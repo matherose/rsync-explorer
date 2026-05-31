@@ -13,12 +13,13 @@ of tools you already have.
 - Restore any file or folder from any snapshot via rsync
 
 ## Expected Backup Structure
-
+```
 your-nas:/backup/
 ├── 2026-05-01_00-44/
 ├── 2026-05-15_00-44/
 ├── 2026-05-30_00-44/
 └── latest -> 2026-05-30_00-44/
+```
 
 ## Building
 
