@@ -60,3 +60,7 @@ dest=/mnt/nas/mybackupfolder
 ## License
 
 WTFPL (yeah, I don't care what you do with it, as long as it doesn't become my problem).
+
+-----
+
+Don't expect regular updates—once it's up and running, I won't touch it again (unless I suddenly feel like adding new features, but I'm incredibly lazy, or more realistically, when there are problems).
