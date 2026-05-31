@@ -27,7 +27,35 @@ cmake -B build && cmake --build build
 
 ## Configuration
 
-Edit config.ini with your NAS host, user, SSH key and backup root path.
+Edit the config.ini file by specifying your NAS hostname, username, SSH key, and the root path for the backup.
+You can add as many entries as you like, provided you follow this format:
+
+- Local:
+  1. Start with [local.<name_of_your_choice>]
+  2. Specify a destination as an absolute path (you can use a relative path if you wish, but this is not recommended)
+
+- Remote:
+  1. Start with [remote.<name_of_your_choice>]
+  2. Add the desired user with ssh_user=<ssh_user>
+  3. Add the desired private key with ssh_key=<ssh_key>
+    3b. If you do not have an SSH key, add the desired password with ssh_pass=<ssh_password>
+  4. Add a destination with an absolute path (as with the local configuration; you can use a relative path if you wish, but this is not recommended)
+
+Good to know:
+- If you configure key=value entries specific to remote access in the local configuration, rsync-explorer will simply ignore them
+- It is recommended to use ssh_key rather than ssh_pass. If both are specified, ssh_pass will be ignored in favor of ssh_key. If ssh_key does not work, simply remove that entry.
+
+### config.ini example
+```
+[local.myfolder]
+dest=/media/external-drive
+
+[remote.nas1]
+host=192.168.1.100
+ssh_user=user1
+ssh_key=/home/myuser/.ssh/id_ed25519
+dest=/mnt/nas/mybackupfolder
+```
 
 ## License
 
