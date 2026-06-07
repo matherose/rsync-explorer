@@ -33,6 +33,8 @@ class MainWindowController: NSWindowController,
     private let timelineToggleButton = NSButton()
     private let breadcrumbLabel = NSTextField(labelWithString: "/")
     private let columnsButton = NSButton()
+    private let themeToggleButton = NSButton()
+    private let keyAppearance = "rsyncx.appearance" // "system" | "light" | "dark"
     private var timelineHeightConstraint: NSLayoutConstraint!
     private let keyTimelineVisible = "rsyncx.timeline.visible"
     private var timelineVisible: Bool {
@@ -115,6 +117,12 @@ class MainWindowController: NSWindowController,
         toolbar.addSubview(searchField)
         toolbar.addSubview(timelineToggleButton)
 
+        themeToggleButton.bezelStyle = .inline
+        themeToggleButton.target = self
+        themeToggleButton.action = #selector(toggleTheme(_:))
+        themeToggleButton.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(themeToggleButton)
+
         columnsButton.bezelStyle = .inline
         columnsButton.image = NSImage(systemSymbolName: "slider.horizontal.3",
                                       accessibilityDescription: "Columns")
@@ -135,7 +143,11 @@ class MainWindowController: NSWindowController,
 
             breadcrumbLabel.leadingAnchor.constraint(equalTo: sourcePopup.trailingAnchor, constant: 10),
             breadcrumbLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            breadcrumbLabel.trailingAnchor.constraint(lessThanOrEqualTo: columnsButton.leadingAnchor, constant: -8),
+            breadcrumbLabel.trailingAnchor.constraint(lessThanOrEqualTo: themeToggleButton.leadingAnchor, constant: -8),
+
+            themeToggleButton.trailingAnchor.constraint(equalTo: columnsButton.leadingAnchor, constant: -8),
+            themeToggleButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            themeToggleButton.widthAnchor.constraint(equalToConstant: 28),
 
             columnsButton.trailingAnchor.constraint(equalTo: timelineToggleButton.leadingAnchor, constant: -8),
             columnsButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -208,6 +220,7 @@ class MainWindowController: NSWindowController,
         ])
         // Timeline hidden by default; user toggles it on.
         applyTimelineVisibility()
+        applyStoredAppearance()
 
         contentView.needsLayout = true
         contentView.layoutSubtreeIfNeeded()
@@ -496,5 +509,39 @@ class MainWindowController: NSWindowController,
         alert.messageText = title
         alert.informativeText = message
         alert.runModal()
+    }
+
+    // MARK: - Theme
+
+    private func storedAppearance() -> String {
+        return UserDefaults.standard.string(forKey: keyAppearance) ?? "system"
+    }
+
+    private func applyStoredAppearance() {
+        switch storedAppearance() {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark":  NSApp.appearance = NSAppearance(named: .darkAqua)
+        default:      NSApp.appearance = nil   // follow the system
+        }
+        updateThemeButtonImage()
+    }
+
+    private func updateThemeButtonImage() {
+        let dark = effectiveAppearanceIsDark()
+        let symbol = dark ? "sun.max" : "moon.fill"
+        themeToggleButton.image = NSImage(systemSymbolName: symbol,
+                                          accessibilityDescription: "Toggle Theme")
+    }
+
+    private func effectiveAppearanceIsDark() -> Bool {
+        let name = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        return name == .darkAqua
+    }
+
+    @objc func toggleTheme(_ sender: Any?) {
+        // First use overrides "system" with an explicit choice; thereafter flips.
+        let nextDark = !effectiveAppearanceIsDark()
+        UserDefaults.standard.set(nextDark ? "dark" : "light", forKey: keyAppearance)
+        applyStoredAppearance()
     }
 }

@@ -51,6 +51,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timelineMenuItem.target = nil   // routed via the responder chain
         viewItem.submenu?.addItem(timelineMenuItem)
         viewItem.submenu?.addItem(NSMenuItem.separator())
+        let themeMenuItem = NSMenuItem(
+            title: "Toggle Light/Dark",
+            action: #selector(MainWindowController.toggleTheme(_:)),
+            keyEquivalent: "")
+        themeMenuItem.target = nil   // routed via the responder chain
+        viewItem.submenu?.addItem(themeMenuItem)
+        viewItem.submenu?.addItem(NSMenuItem.separator())
         viewItem.submenu?.addItem(NSMenuItem(title: "Enter Full Screen",
                                              action: #selector(NSWindow.toggleFullScreen(_:)),
                                              keyEquivalent: "f"))
