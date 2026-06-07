@@ -527,8 +527,13 @@ class MainWindowController: NSWindowController,
     }
 
     private func updateThemeButtonImage() {
-        let dark = effectiveAppearanceIsDark()
-        let symbol = dark ? "sun.max" : "moon.fill"
+        let dark: Bool
+        switch storedAppearance() {
+        case "light": dark = false
+        case "dark":  dark = true
+        default:      dark = effectiveAppearanceIsDark() // system: effective is the right source
+        }
+        let symbol = dark ? "sun.max.fill" : "moon.fill"
         themeToggleButton.image = NSImage(systemSymbolName: symbol,
                                           accessibilityDescription: "Toggle Theme")
     }
