@@ -1,6 +1,6 @@
 /**
  * FileListViewController.swift
- * Finder-like file list: clean rows, file-type icons, subtle class badges,
+ * Finder-like file list: clean rows, file-type icons, leading status dots,
  * right-click context menu, Quick Look with remote download, double-click nav.
  */
 
