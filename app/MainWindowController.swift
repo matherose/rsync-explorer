@@ -44,6 +44,7 @@ class MainWindowController: NSWindowController,
 
     // Navigation stack
     private var pathStack: [String] = []
+    private var searchGeneration = 0
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
@@ -413,6 +414,8 @@ class MainWindowController: NSWindowController,
         let query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty, let source = currentSource else { return }
         statusBar.startLoading()
+        searchGeneration += 1
+        let generation = searchGeneration
 
         let snaps = snapshots
         let from = timelineVisible ? fromIdx : 0
@@ -424,6 +427,7 @@ class MainWindowController: NSWindowController,
                                                fromIdx: from, toIdx: to)
             DispatchQueue.main.async {
                 guard let self = self else { return }
+                guard generation == self.searchGeneration else { return } // stale search; discard
                 self.statusBar.stopLoading()
                 guard let results = results else {
                     self.fileListVC.updateFiles([])
