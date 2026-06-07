@@ -62,5 +62,10 @@ int main(void)
 
     printf("PASS: search returned %d entries; alpha=UNCH beta=NEW gamma=DEL\n", count);
     rsyncx_free(out);
+
+    char rmcmd[600];
+    snprintf(rmcmd, sizeof rmcmd, "rm -rf \"%s\"", base);
+    (void)system(rmcmd);
+
     return 0;
 }
