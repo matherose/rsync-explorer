@@ -20,9 +20,13 @@ test_search: test_search.c libengine.a engine.h engine_internal.h
 	$(CC) $(CFLAGS) -I. test_search.c libengine.a -o test_search
 	./test_search
 
-test: test_search
+test_ssh: test_ssh.c libengine.a engine.h engine_internal.h
+	$(CC) $(CFLAGS) -I. test_ssh.c libengine.a -o test_ssh
+	./test_ssh
+
+test: test_search test_ssh
 
 clean:
-	rm -f $(OBJS) libengine.a test_engine test_search
+	rm -f $(OBJS) libengine.a test_engine test_search test_ssh
 
 .PHONY: all clean test
