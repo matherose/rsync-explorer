@@ -218,7 +218,7 @@ class FileListViewController: NSViewController,
         case .modified, .delNew: color = .systemOrange
         default:                 return nil   // deleted shows as red name; unchanged shows nothing
         }
-        let dot = NSView(frame: NSRect(x: 6, y: 8, width: 8, height: 8))
+        let dot = NSView(frame: NSRect(x: 6, y: 6, width: 8, height: 8))
         dot.wantsLayer = true
         dot.layer?.backgroundColor = color.cgColor
         dot.layer?.cornerRadius = 4
