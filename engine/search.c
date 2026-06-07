@@ -6,6 +6,7 @@
 
 #include "engine_internal.h"
 #include <fts.h>
+#include <pthread.h>
 #include <sys/wait.h>
 
 static int parse_find_line(const char *line, file_entry_t *fe)
@@ -93,6 +94,20 @@ static int search_local(const char *snapshot_path,
 
     fts_close(fts);
     return 0;
+}
+
+typedef struct {
+    const char         *snapshot_path;
+    const char         *query;
+    file_entry_array_t *out;
+    int                 rc;
+} local_search_job_t;
+
+static void *local_search_worker(void *arg)
+{
+    local_search_job_t *job = (local_search_job_t *)arg;
+    job->rc = search_local(job->snapshot_path, job->query, job->out);
+    return NULL;
 }
 
 /**
@@ -215,13 +230,33 @@ int rsyncx_search(const source_t *src,
             }
         }
     } else {
-        /* ── SEQUENTIAL LOCAL SEARCH ── */
-        for (int i = 0; i < range_len; i++) {
-            int rc = search_local(snaps[from_idx + i].full_path,
-                                  query, &snap_arrays[i]);
-            if (rc != 0) {
-                snap_arrays[i].count = 0;
+        /* ── PARALLEL LOCAL SEARCH ── */
+        pthread_t          *threads = malloc((size_t)range_len * sizeof(pthread_t));
+        local_search_job_t *jobs    = malloc((size_t)range_len * sizeof(local_search_job_t));
+
+        if (!threads || !jobs) {
+            free(threads); free(jobs);
+            for (int i = 0; i < range_len; i++) snap_arrays[i].count = 0;
+        } else {
+            for (int i = 0; i < range_len; i++) {
+                jobs[i].snapshot_path = snaps[from_idx + i].full_path;
+                jobs[i].query         = query;
+                jobs[i].out           = &snap_arrays[i];
+                jobs[i].rc            = 0;
+                if (pthread_create(&threads[i], NULL,
+                                   local_search_worker, &jobs[i]) != 0) {
+                    /* Fall back to running this snapshot inline. */
+                    jobs[i].rc = search_local(jobs[i].snapshot_path,
+                                              jobs[i].query, jobs[i].out);
+                    threads[i] = 0;
+                }
             }
+            for (int i = 0; i < range_len; i++) {
+                if (threads[i] != 0) pthread_join(threads[i], NULL);
+                if (jobs[i].rc != 0) snap_arrays[i].count = 0;
+            }
+            free(threads);
+            free(jobs);
         }
     }
 
