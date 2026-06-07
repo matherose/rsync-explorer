@@ -29,6 +29,13 @@ class MainWindowController: NSWindowController,
     private let searchField = NSSearchField()
     private let sourcePopup = NSPopUpButton()
     private let backButton = NSButton()
+    private let timelineToggleButton = NSButton()
+    private var timelineHeightConstraint: NSLayoutConstraint!
+    private let keyTimelineVisible = "rsyncx.timeline.visible"
+    private var timelineVisible: Bool {
+        get { UserDefaults.standard.bool(forKey: keyTimelineVisible) } // default false
+        set { UserDefaults.standard.set(newValue, forKey: keyTimelineVisible) }
+    }
 
     // Navigation stack
     private var pathStack: [String] = []
@@ -81,6 +88,13 @@ class MainWindowController: NSWindowController,
         searchField.action = #selector(searchSubmitted)
         searchField.translatesAutoresizingMaskIntoConstraints = false
 
+        timelineToggleButton.bezelStyle = .inline
+        timelineToggleButton.image = NSImage(systemSymbolName: "clock",
+                                             accessibilityDescription: "Toggle Timeline")
+        timelineToggleButton.target = self
+        timelineToggleButton.action = #selector(toggleTimeline(_:))
+        timelineToggleButton.translatesAutoresizingMaskIntoConstraints = false
+
         // Toolbar row
         let toolbar = NSView()
         toolbar.translatesAutoresizingMaskIntoConstraints = false
@@ -88,6 +102,7 @@ class MainWindowController: NSWindowController,
         toolbar.addSubview(backButton)
         toolbar.addSubview(sourcePopup)
         toolbar.addSubview(searchField)
+        toolbar.addSubview(timelineToggleButton)
 
         NSLayoutConstraint.activate([
             toolbar.heightAnchor.constraint(equalToConstant: 32),
@@ -98,6 +113,10 @@ class MainWindowController: NSWindowController,
 
             sourcePopup.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 4),
             sourcePopup.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            timelineToggleButton.trailingAnchor.constraint(equalTo: searchField.leadingAnchor, constant: -8),
+            timelineToggleButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            timelineToggleButton.widthAnchor.constraint(equalToConstant: 28),
 
             searchField.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
             searchField.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -134,6 +153,7 @@ class MainWindowController: NSWindowController,
         contentView.addSubview(splitView)
         contentView.addSubview(statusBar)
 
+        timelineHeightConstraint = timelineView.heightAnchor.constraint(equalToConstant: 40)
         NSLayoutConstraint.activate([
             // Toolbar at top
             toolbar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 2),
@@ -145,7 +165,7 @@ class MainWindowController: NSWindowController,
             timelineView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             timelineView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             timelineView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            timelineView.heightAnchor.constraint(equalToConstant: 40),
+            timelineHeightConstraint,
 
             // Split view fills remaining space
             splitView.topAnchor.constraint(equalTo: timelineView.bottomAnchor),
@@ -159,6 +179,8 @@ class MainWindowController: NSWindowController,
             statusBar.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 22),
         ])
+        // Timeline hidden by default; user toggles it on.
+        applyTimelineVisibility()
 
         contentView.needsLayout = true
         contentView.layoutSubtreeIfNeeded()
@@ -313,6 +335,26 @@ class MainWindowController: NSWindowController,
         expandCurrentTree()
     }
 
+    @objc func toggleTimeline(_ sender: Any?) {
+        timelineVisible.toggle()
+        applyTimelineVisibility()
+        if !timelineVisible {
+            // Reset to the full range so a hidden timeline means "all snapshots".
+            fromIdx = 0
+            toIdx = max(0, snapshots.count - 1)
+            timelineView.fromIdx = fromIdx
+            timelineView.toIdx = toIdx
+            scanCurrentDir()
+            expandCurrentTree()
+        }
+    }
+
+    private func applyTimelineVisibility() {
+        timelineView.isHidden = !timelineVisible
+        timelineHeightConstraint.constant = timelineVisible ? 40 : 0
+        timelineToggleButton.state = timelineVisible ? .on : .off
+    }
+
     // MARK: - Search
 
     @objc private func searchSubmitted() {
@@ -320,9 +362,9 @@ class MainWindowController: NSWindowController,
         guard !query.isEmpty, let source = currentSource else { return }
         statusBar.startLoading()
 
-        let from = fromIdx
-        let to = toIdx
         let snaps = snapshots
+        let from = timelineVisible ? fromIdx : 0
+        let to   = timelineVisible ? toIdx   : max(0, snaps.count - 1)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let results = EngineBridge.search(source: source, snapshots: snaps,
