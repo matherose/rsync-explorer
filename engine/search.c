@@ -1,0 +1,246 @@
+/**
+ * @file search.c
+ * @brief Global recursive search across all snapshots.
+ *        Remote searches run in parallel via fork+pipe.
+ */
+
+#include "engine_internal.h"
+#include <fts.h>
+#include <sys/wait.h>
+
+static int parse_find_line(const char *line, file_entry_t *fe)
+{
+    char buf[2048];
+    str_copy(buf, sizeof(buf), line);
+
+    char *fields[8] = {0};
+    int field_count = 0;
+    char *tok = buf;
+    for (int i = 0; i < 8; i++) {
+        fields[i] = tok;
+        char *tab = strchr(tok, '\t');
+        if (tab) { *tab = '\0'; tok = tab + 1; field_count++; }
+        else { str_trim(tok); field_count++; break; }
+    }
+
+    if (field_count < 8) return -1;
+    if (fields[7][0] == '\0') return -1;
+
+    memset(fe, 0, sizeof(*fe));
+    fe->inode = (uint64_t)strtoull(fields[0], NULL, 10);
+    fe->mode  = (uint32_t)strtoul(fields[1], NULL, 8);
+    str_copy(fe->user, sizeof(fe->user), fields[2]);
+    str_copy(fe->group, sizeof(fe->group), fields[3]);
+    fe->size  = (uint64_t)strtoull(fields[4], NULL, 10);
+    fe->mtime = (int64_t)strtoll(fields[5], NULL, 10);
+    fe->nlink = (uint32_t)strtoul(fields[6], NULL, 10);
+    str_copy(fe->rel_path, sizeof(fe->rel_path), fields[7]);
+
+    fe->is_dir = S_ISDIR(fe->mode) ? 1 : 0;
+    if (fe->is_dir) fe->size = 0;
+
+    return 0;
+}
+
+static int search_local(const char *snapshot_path,
+                        const char *query,
+                        file_entry_array_t *out)
+{
+    char *paths[] = { (char *)snapshot_path, NULL };
+    FTS *fts = fts_open(paths, FTS_PHYSICAL | FTS_NOCHDIR, NULL);
+    if (!fts) return -1;
+
+    size_t base_len = strlen(snapshot_path);
+
+    FTSENT *ent;
+    while ((ent = fts_read(fts)) != NULL) {
+        /* Skip directories (pre- and post-order) and unreadable entries. */
+        if (ent->fts_info == FTS_D  || ent->fts_info == FTS_DP ||
+            ent->fts_info == FTS_DNR || ent->fts_info == FTS_ERR ||
+            ent->fts_info == FTS_NS)
+            continue;
+
+        /* Match the filename like `find -name "*query*"` (case-sensitive). */
+        if (query[0] != '\0' && strstr(ent->fts_name, query) == NULL)
+            continue;
+
+        const struct stat *st = ent->fts_statp;
+        if (S_ISDIR(st->st_mode)) continue;   /* -not -type d */
+
+        file_entry_t fe;
+        memset(&fe, 0, sizeof(fe));
+
+        /* rel_path = path relative to the snapshot root (like find's %P). */
+        const char *rel = ent->fts_path + base_len;
+        while (*rel == '/') rel++;
+        str_copy(fe.rel_path, sizeof(fe.rel_path), rel);
+
+        fe.inode = (uint64_t)st->st_ino;
+        fe.mode  = (uint32_t)st->st_mode;
+        fe.size  = (uint64_t)st->st_size;
+        fe.mtime = (int64_t)st->st_mtime;
+        fe.nlink = (uint32_t)st->st_nlink;
+        fe.is_dir = 0;
+
+        resolve_user(st->st_uid, fe.user, sizeof(fe.user));
+        resolve_group(st->st_gid, fe.group, sizeof(fe.group));
+
+        if (fe_array_push(out, &fe) != 0) {
+            fts_close(fts);
+            return -1;
+        }
+    }
+
+    fts_close(fts);
+    return 0;
+}
+
+/**
+ * Parallel remote search: fork one child per snapshot, each runs
+ * SSH find, parses results, writes binary file_entry_t to a pipe.
+ * Parent reads all pipes concurrently.
+ */
+int rsyncx_search(const source_t *src,
+                  const snapshot_t *snaps, int snap_count,
+                  const char *query,
+                  int from_idx, int to_idx,
+                  lifecycle_t **out, int *count)
+{
+    if (!src || !snaps || !out || !count || !query) return -1;
+    if (from_idx < 0) from_idx = 0;
+    if (to_idx >= snap_count) to_idx = snap_count - 1;
+    if (from_idx > to_idx) { *out = NULL; *count = 0; return 0; }
+
+    int range_len = to_idx - from_idx + 1;
+
+    file_entry_array_t *snap_arrays = calloc((size_t)range_len,
+                                              sizeof(file_entry_array_t));
+    file_entry_t      **snap_entries = malloc((size_t)range_len * sizeof(file_entry_t *));
+    int                *snap_counts  = malloc((size_t)range_len * sizeof(int));
+    if (!snap_arrays || !snap_entries || !snap_counts) {
+        free(snap_arrays); free(snap_entries); free(snap_counts);
+        return -1;
+    }
+
+    for (int i = 0; i < range_len; i++) {
+        fe_array_init(&snap_arrays[i]);
+    }
+
+    int result = 0;
+
+    if (src->type == SOURCE_REMOTE) {
+        /* ── PARALLEL REMOTE SEARCH ── */
+        char cmds[64][SSH_CMD_MAX];
+        int   pipes[64][2];
+        pid_t pids[64];
+        int   n = range_len > 64 ? 64 : range_len;
+
+        for (int i = 0; i < n; i++) {
+            if (ssh_build_find_cmd(src, snaps[from_idx + i].full_path,
+                                   -1, NULL, query,
+                                   cmds[i], sizeof(cmds[i])) != 0) {
+                cmds[i][0] = '\0';
+            }
+            if (pipe(pipes[i]) != 0) {
+                cmds[i][0] = '\0';
+            }
+        }
+
+        for (int i = 0; i < n; i++) {
+            if (cmds[i][0] == '\0') {
+                pids[i] = -1;
+                close(pipes[i][0]);
+                close(pipes[i][1]);
+                continue;
+            }
+
+            pids[i] = fork();
+            if (pids[i] < 0) {
+                close(pipes[i][0]);
+                close(pipes[i][1]);
+                pids[i] = -1;
+                continue;
+            }
+
+            if (pids[i] == 0) {
+                /* ── CHILD ── */
+                close(pipes[i][0]);
+
+                FILE *fp = popen(cmds[i], "r");
+                if (!fp) {
+                    close(pipes[i][1]);
+                    _exit(1);
+                }
+
+                char line[2048];
+                while (fgets(line, sizeof(line), fp)) {
+                    str_trim(line);
+                    if (line[0] == '\0') continue;
+
+                    file_entry_t fe;
+                    if (parse_find_line(line, &fe) != 0) continue;
+                    if (fe.is_dir) continue;
+
+                    write(pipes[i][1], &fe, sizeof(fe));
+                }
+
+                pclose(fp);
+                close(pipes[i][1]);
+                _exit(0);
+            }
+
+            /* ── PARENT ── */
+            close(pipes[i][1]);
+        }
+
+        /* Read binary records from each child */
+        for (int i = 0; i < n; i++) {
+            if (pids[i] < 0) continue;
+
+            FILE *fp = fdopen(pipes[i][0], "r");
+            if (fp) {
+                file_entry_t fe;
+                while (fread(&fe, sizeof(fe), 1, fp) == 1) {
+                    fe_array_push(&snap_arrays[i], &fe);
+                }
+                fclose(fp);
+            }
+        }
+
+        /* Reap children */
+        for (int i = 0; i < n; i++) {
+            if (pids[i] > 0) {
+                int status = 0;
+                waitpid(pids[i], &status, 0);
+            }
+        }
+    } else {
+        /* ── SEQUENTIAL LOCAL SEARCH ── */
+        for (int i = 0; i < range_len; i++) {
+            int rc = search_local(snaps[from_idx + i].full_path,
+                                  query, &snap_arrays[i]);
+            if (rc != 0) {
+                snap_arrays[i].count = 0;
+            }
+        }
+    }
+
+    if (result == 0) {
+        for (int i = 0; i < range_len; i++) {
+            snap_entries[i] = snap_arrays[i].data;
+            snap_counts[i]  = snap_arrays[i].count;
+        }
+
+        classify_entries(snap_entries, snap_counts, range_len,
+                         &snaps[from_idx], "", out, count);
+    }
+
+    for (int i = 0; i < range_len; i++) {
+        fe_array_free(&snap_arrays[i]);
+    }
+    free(snap_arrays);
+    free(snap_entries);
+    free(snap_counts);
+
+    return result;
+}
