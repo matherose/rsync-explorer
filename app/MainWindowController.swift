@@ -31,6 +31,8 @@ class MainWindowController: NSWindowController,
     private let sourcePopup = NSPopUpButton()
     private let backButton = NSButton()
     private let timelineToggleButton = NSButton()
+    private let breadcrumbLabel = NSTextField(labelWithString: "/")
+    private let columnsButton = NSButton()
     private var timelineHeightConstraint: NSLayoutConstraint!
     private let keyTimelineVisible = "rsyncx.timeline.visible"
     private var timelineVisible: Bool {
@@ -102,8 +104,23 @@ class MainWindowController: NSWindowController,
 
         toolbar.addSubview(backButton)
         toolbar.addSubview(sourcePopup)
+
+        breadcrumbLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        breadcrumbLabel.textColor = .secondaryLabelColor
+        breadcrumbLabel.lineBreakMode = .byTruncatingHead
+        breadcrumbLabel.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(breadcrumbLabel)
+
         toolbar.addSubview(searchField)
         toolbar.addSubview(timelineToggleButton)
+
+        columnsButton.bezelStyle = .inline
+        columnsButton.image = NSImage(systemSymbolName: "slider.horizontal.3",
+                                      accessibilityDescription: "Columns")
+        columnsButton.target = self
+        columnsButton.action = #selector(showColumnsMenu(_:))
+        columnsButton.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.addSubview(columnsButton)
 
         NSLayoutConstraint.activate([
             toolbar.heightAnchor.constraint(equalToConstant: 32),
@@ -114,6 +131,13 @@ class MainWindowController: NSWindowController,
 
             sourcePopup.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 4),
             sourcePopup.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            breadcrumbLabel.leadingAnchor.constraint(equalTo: sourcePopup.trailingAnchor, constant: 10),
+            breadcrumbLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            columnsButton.trailingAnchor.constraint(equalTo: timelineToggleButton.leadingAnchor, constant: -8),
+            columnsButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            columnsButton.widthAnchor.constraint(equalToConstant: 28),
 
             timelineToggleButton.trailingAnchor.constraint(equalTo: searchField.leadingAnchor, constant: -8),
             timelineToggleButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -256,6 +280,7 @@ class MainWindowController: NSWindowController,
     // MARK: - Directory scanning
 
     private func scanCurrentDir() {
+        updateBreadcrumb()
         guard let source = currentSource, !snapshots.isEmpty else { return }
         statusBar.startLoading()
 
@@ -365,6 +390,10 @@ class MainWindowController: NSWindowController,
 
     // MARK: - Search
 
+    @objc private func showColumnsMenu(_ sender: Any?) {
+        fileListVC.showColumnMenu()
+    }
+
     @objc private func searchSubmitted() {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty, let source = currentSource else { return }
@@ -455,6 +484,10 @@ class MainWindowController: NSWindowController,
     }
 
     // MARK: - Helpers
+
+    private func updateBreadcrumb() {
+        breadcrumbLabel.stringValue = currentPath.isEmpty ? "/" : "/" + currentPath
+    }
 
     private func showAlert(title: String, message: String) {
         let alert = NSAlert()
