@@ -1,2 +1,5 @@
 *.DS_Store
 *.ini
+
+# Visual brainstorming companion
+.superpowers/
