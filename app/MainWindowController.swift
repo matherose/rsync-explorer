@@ -108,6 +108,7 @@ class MainWindowController: NSWindowController,
         breadcrumbLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         breadcrumbLabel.textColor = .secondaryLabelColor
         breadcrumbLabel.lineBreakMode = .byTruncatingHead
+        breadcrumbLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         breadcrumbLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(breadcrumbLabel)
 
@@ -134,6 +135,7 @@ class MainWindowController: NSWindowController,
 
             breadcrumbLabel.leadingAnchor.constraint(equalTo: sourcePopup.trailingAnchor, constant: 10),
             breadcrumbLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            breadcrumbLabel.trailingAnchor.constraint(lessThanOrEqualTo: columnsButton.leadingAnchor, constant: -8),
 
             columnsButton.trailingAnchor.constraint(equalTo: timelineToggleButton.leadingAnchor, constant: -8),
             columnsButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
