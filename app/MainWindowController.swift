@@ -11,6 +11,7 @@ class MainWindowController: NSWindowController,
                               SidebarDelegate,
                               TimelineViewDelegate,
                               NSSearchFieldDelegate,
+                              NSMenuItemValidation,
                               FileListDownloadDelegate {
 
     private var sources: [Source] = []
@@ -347,6 +348,13 @@ class MainWindowController: NSWindowController,
             scanCurrentDir()
             expandCurrentTree()
         }
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleTimeline(_:)) {
+            menuItem.state = timelineVisible ? .on : .off
+        }
+        return true
     }
 
     private func applyTimelineVisibility() {
