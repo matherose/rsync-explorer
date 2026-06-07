@@ -9,6 +9,8 @@
 #include <pthread.h>
 #include <sys/wait.h>
 
+#define MAX_LOCAL_THREADS 64
+
 static int parse_find_line(const char *line, file_entry_t *fe)
 {
     char buf[2048];
@@ -230,29 +232,44 @@ int rsyncx_search(const source_t *src,
             }
         }
     } else {
-        /* ── PARALLEL LOCAL SEARCH ── */
-        pthread_t          *threads = malloc((size_t)range_len * sizeof(pthread_t));
-        local_search_job_t *jobs    = malloc((size_t)range_len * sizeof(local_search_job_t));
+        /* ── PARALLEL LOCAL SEARCH (bounded concurrency) ── */
+        int max_threads = range_len < MAX_LOCAL_THREADS
+                        ? range_len : MAX_LOCAL_THREADS;
+        pthread_t          *threads = malloc((size_t)max_threads * sizeof(pthread_t));
+        local_search_job_t *jobs    = malloc((size_t)range_len   * sizeof(local_search_job_t));
 
         if (!threads || !jobs) {
             free(threads); free(jobs);
             for (int i = 0; i < range_len; i++) snap_arrays[i].count = 0;
         } else {
-            for (int i = 0; i < range_len; i++) {
-                jobs[i].snapshot_path = snaps[from_idx + i].full_path;
-                jobs[i].query         = query;
-                jobs[i].out           = &snap_arrays[i];
-                jobs[i].rc            = 0;
-                if (pthread_create(&threads[i], NULL,
-                                   local_search_worker, &jobs[i]) != 0) {
-                    /* Fall back to running this snapshot inline. */
-                    jobs[i].rc = search_local(jobs[i].snapshot_path,
-                                              jobs[i].query, jobs[i].out);
-                    threads[i] = 0;
+            for (int base = 0; base < range_len; base += max_threads) {
+                int batch = range_len - base;
+                if (batch > max_threads) batch = max_threads;
+
+                /* Launch this wave. threads[j] indexes within the wave;
+                   jobs[i] is indexed globally so results land in the right array. */
+                for (int j = 0; j < batch; j++) {
+                    int i = base + j;
+                    jobs[i].snapshot_path = snaps[from_idx + i].full_path;
+                    jobs[i].query         = query;
+                    jobs[i].out           = &snap_arrays[i];
+                    jobs[i].rc            = 0;
+                    if (pthread_create(&threads[j], NULL,
+                                       local_search_worker, &jobs[i]) != 0) {
+                        /* Fall back to running this snapshot inline. */
+                        jobs[i].rc = search_local(jobs[i].snapshot_path,
+                                                  jobs[i].query, jobs[i].out);
+                        threads[j] = 0;
+                    }
+                }
+
+                /* Join this wave before starting the next. */
+                for (int j = 0; j < batch; j++) {
+                    if (threads[j] != 0) pthread_join(threads[j], NULL);
                 }
             }
+
             for (int i = 0; i < range_len; i++) {
-                if (threads[i] != 0) pthread_join(threads[i], NULL);
                 if (jobs[i].rc != 0) snap_arrays[i].count = 0;
             }
             free(threads);

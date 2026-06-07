@@ -1,7 +1,7 @@
 # engine/Makefile — builds libengine.a for rsync-explorer
 
 CC      = clang
-CFLAGS  = -std=c11 -Wall -Wextra -Werror -O2 -fvisibility=hidden
+CFLAGS  = -std=c11 -Wall -Wextra -Werror -O2 -fvisibility=hidden -pthread
 AR      = ar
 
 SRCS    = config.c discover.c scan.c scan_macos.c scan_posix.c \
