@@ -6,7 +6,6 @@
 
 #include "engine_internal.h"
 #include <sys/wait.h>
-#include <fcntl.h>
 
 static int parse_find_line(const char *line, file_entry_t *fe)
 {

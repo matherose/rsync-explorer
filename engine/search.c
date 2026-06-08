@@ -197,9 +197,10 @@ int rsyncx_search(const source_t *src,
 
                     file_entry_t fe;
                     if (parse_find_line(line, &fe) != 0) continue;
-                    if (fe.is_dir) continue;
+                    if (fe.is_dir) continue;  /* search returns files only */
 
-                    write(pipes[i][1], &fe, sizeof(fe));
+                    ssize_t w = write(pipes[i][1], &fe, sizeof(fe));
+                    (void)w;  /* best effort */
                 }
 
                 ssh_spawn_reap(fp, gpid);
