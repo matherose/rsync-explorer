@@ -97,6 +97,35 @@ int ssh_build_readlink_cmd(const source_t *src,
                            const char *path,
                            char *cmd, size_t cmd_size);
 
+/* ── Safe argv-based SSH execution (ssh.c) ── */
+
+/* Single-quote-escape `in` for a POSIX shell into `out` (wraps in '...',
+   rewriting each ' as '\''). Returns 0, or -1 if it does not fit. */
+int ssh_shell_quote(const char *in, char *out, size_t out_size);
+
+/* Build an argv vector (NULL-terminated) for running find/ls/readlink on the
+   remote host via `ssh`, with all remote-shell data single-quote-escaped.
+   argv[] entries point at string literals, into `src`, or into `pool`.
+   `argv` needs >= 24 slots; `pool` should be >= SSH_CMD_MAX bytes.
+   Returns 0 on success, -1 on error/overflow. */
+int ssh_build_find_argv(const source_t *src, const char *find_path,
+                        int maxdepth, const char *type_filter,
+                        const char *name_filter,
+                        char **argv, int argv_max,
+                        char *pool, size_t pool_size);
+int ssh_build_ls_argv(const source_t *src, const char *path,
+                      char **argv, int argv_max,
+                      char *pool, size_t pool_size);
+int ssh_build_readlink_argv(const source_t *src, const char *path,
+                            char **argv, int argv_max,
+                            char *pool, size_t pool_size);
+
+/* Spawn argv[0] with argv via fork+execvp (NO shell); parent reads the child's
+   stdout through the returned FILE*. Sets *out_pid. Returns NULL on failure. */
+FILE *ssh_spawn_capture(char *const argv[], pid_t *out_pid);
+/* fclose(fp) + waitpid(pid). Returns the child's wait status, or -1. */
+int ssh_spawn_reap(FILE *fp, pid_t pid);
+
 /* ── User/group resolution ── */
 
 static inline void resolve_user(uid_t uid, char *out, size_t out_size)
