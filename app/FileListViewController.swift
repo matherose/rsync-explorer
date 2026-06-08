@@ -9,7 +9,9 @@ import Quartz
 
 protocol FileListDownloadDelegate: AnyObject {
     func downloadFile(_ entry: FileEntry, to localURL: URL)
-    func scpCommand(for entry: FileEntry) -> String?
+    /// scp argument vector (everything after the `scp` executable) to copy
+    /// `entry` to `destination`, or nil if the source is local / not permitted.
+    func scpArguments(for entry: FileEntry, to destination: URL) -> [String]?
 }
 
 class FileListViewController: NSViewController,
@@ -388,14 +390,10 @@ class FileListViewController: NSViewController,
 
     private func openFileInPreview(_ file: FileEntry) {
         guard !file.isDir else { return }
-        if let scpCmd = downloadDelegate?.scpCommand(for: file) {
-            downloadToTempAndOpen(file: file, scpCmd: scpCmd)
-        } else {
-            NSWorkspace.shared.open(URL(fileURLWithPath: file.lastRealPath))
-        }
+        downloadToTempAndOpen(file: file)
     }
 
-    private func downloadToTempAndOpen(file: FileEntry, scpCmd: String) {
+    private func downloadToTempAndOpen(file: FileEntry) {
         let fileName = URL(fileURLWithPath: file.relPath).lastPathComponent
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("rsync-explorer-preview", isDirectory: true)
@@ -403,10 +401,16 @@ class FileListViewController: NSViewController,
         let tempFile = tempDir.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: tempFile)
 
+        guard let args = downloadDelegate?.scpArguments(for: file, to: tempFile) else {
+            // Local source (or not permitted): open the file directly.
+            NSWorkspace.shared.open(URL(fileURLWithPath: file.lastRealPath))
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", scpCmd]
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+            process.arguments = args
             process.standardOutput = Pipe()
             process.standardError = Pipe()
             do {
@@ -481,12 +485,12 @@ class FileListViewController: NSViewController,
             .appendingPathComponent("rsync-explorer-preview/\(fileName)")
         if FileManager.default.fileExists(atPath: tempFile.path) { completion(); return }
 
-        guard let scpCmd = downloadDelegate?.scpCommand(for: file) else { completion(); return }
+        guard let args = downloadDelegate?.scpArguments(for: file, to: tempFile) else { completion(); return }
 
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", scpCmd]
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+            process.arguments = args
             process.standardOutput = Pipe()
             process.standardError = Pipe()
             do { try process.run(); process.waitUntilExit() } catch {}

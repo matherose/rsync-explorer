@@ -450,33 +450,32 @@ class MainWindowController: NSWindowController,
 
     // MARK: - FileListDownloadDelegate
 
-    func scpCommand(for entry: FileEntry) -> String? {
+    func scpArguments(for entry: FileEntry, to destination: URL) -> [String]? {
         guard let source = currentSource, source.type == .remote else { return nil }
         let remotePath = entry.lastRealPath
-        let fileName = URL(fileURLWithPath: entry.relPath).lastPathComponent
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("rsync-explorer-preview", isDirectory: true).path
-        try? FileManager.default.createDirectory(atPath: tempDir,
-                                                  withIntermediateDirectories: true)
-        let destPath = tempDir + "/" + fileName
-        return "scp -i \(source.sshKey) -o BatchMode=yes -o StrictHostKeyChecking=no "
-             + "\(source.user)@\(source.host):\"\(remotePath)\" \"\(destPath)\""
+        // Defense for legacy (non-SFTP) scp: reject control chars that could
+        // break out on a remote shell. Modern macOS scp uses SFTP (path is literal).
+        guard !remotePath.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\0" }) else { return nil }
+        let remoteSpec = "\(source.user)@\(source.host):\(remotePath)"
+        return ["-i", source.sshKey,
+                "-o", "BatchMode=yes",
+                "-o", "StrictHostKeyChecking=no",
+                remoteSpec,
+                destination.path]
     }
 
     func downloadFile(_ entry: FileEntry, to localURL: URL) {
-        guard let source = currentSource, source.type == .remote else {
+        guard currentSource?.type == .remote else {
             try? FileManager.default.copyItem(at: URL(fileURLWithPath: entry.lastRealPath),
                                                 to: localURL)
             return
         }
-        let remotePath = entry.lastRealPath
-        let scpCmd = "scp -i \(source.sshKey) -o BatchMode=yes -o StrictHostKeyChecking=no "
-                   + "\(source.user)@\(source.host):\"\(remotePath)\" \"\(localURL.path)\""
+        guard let args = scpArguments(for: entry, to: localURL) else { return }
         statusBar.startLoading()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = ["-c", scpCmd]
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+            process.arguments = args
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
