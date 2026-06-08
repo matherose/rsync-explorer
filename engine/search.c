@@ -147,27 +147,18 @@ int rsyncx_search(const source_t *src,
 
     if (src->type == SOURCE_REMOTE) {
         /* ── PARALLEL REMOTE SEARCH ── */
-        char cmds[64][SSH_CMD_MAX];
+        int   ok[64];
         int   pipes[64][2];
         pid_t pids[64];
         int   n = range_len > 64 ? 64 : range_len;
 
         for (int i = 0; i < n; i++) {
-            if (ssh_build_find_cmd(src, snaps[from_idx + i].full_path,
-                                   -1, NULL, query,
-                                   cmds[i], sizeof(cmds[i])) != 0) {
-                cmds[i][0] = '\0';
-            }
-            if (pipe(pipes[i]) != 0) {
-                cmds[i][0] = '\0';
-            }
+            ok[i] = (pipe(pipes[i]) == 0);
         }
 
         for (int i = 0; i < n; i++) {
-            if (cmds[i][0] == '\0') {
+            if (!ok[i]) {
                 pids[i] = -1;
-                close(pipes[i][0]);
-                close(pipes[i][1]);
                 continue;
             }
 
@@ -183,7 +174,17 @@ int rsyncx_search(const source_t *src,
                 /* ── CHILD ── */
                 close(pipes[i][0]);
 
-                FILE *fp = popen(cmds[i], "r");
+                char *argv[24];
+                char  pool[SSH_CMD_MAX];
+                pid_t gpid = -1;
+                if (ssh_build_find_argv(src, snaps[from_idx + i].full_path,
+                                        -1, NULL, query,
+                                        argv, 24, pool, sizeof pool) != 0) {
+                    close(pipes[i][1]);
+                    _exit(1);
+                }
+
+                FILE *fp = ssh_spawn_capture(argv, &gpid);
                 if (!fp) {
                     close(pipes[i][1]);
                     _exit(1);
@@ -201,7 +202,7 @@ int rsyncx_search(const source_t *src,
                     write(pipes[i][1], &fe, sizeof(fe));
                 }
 
-                pclose(fp);
+                ssh_spawn_reap(fp, gpid);
                 close(pipes[i][1]);
                 _exit(0);
             }

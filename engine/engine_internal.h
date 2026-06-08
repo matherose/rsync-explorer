@@ -84,19 +84,6 @@ int expand_tree_entries(file_entry_t **snap_entries,
 
 #define SSH_CMD_MAX 4096
 
-int ssh_build_find_cmd(const source_t *src,
-                       const char *find_path,
-                       int maxdepth,
-                       const char *type_filter,
-                       const char *name_filter,
-                       char *cmd, size_t cmd_size);
-int ssh_build_ls_cmd(const source_t *src,
-                     const char *path,
-                     char *cmd, size_t cmd_size);
-int ssh_build_readlink_cmd(const source_t *src,
-                           const char *path,
-                           char *cmd, size_t cmd_size);
-
 /* ── Safe argv-based SSH execution (ssh.c) ── */
 
 /* Single-quote-escape `in` for a POSIX shell into `out` (wraps in '...',
