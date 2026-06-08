@@ -65,6 +65,23 @@ int main(void)
     assert(strstr(remote, "ControlMaster") == NULL);
     assert(strstr(remote, "ssh ") == NULL);
 
+    /* ── ssh_build_ls_argv ── */
+    char *lv[24];
+    char lpool[SSH_CMD_MAX];
+    assert(ssh_build_ls_argv(&src, "/backup/la'test", lv, 24, lpool, sizeof lpool) == 0);
+    assert(strcmp(lv[0], "ssh") == 0);
+    int lk = 0; while (lv[lk]) lk++;
+    assert(strstr(lv[lk - 1], "ls -1 '/backup/la'\\''test'") != NULL);
+    assert(strstr(lv[lk - 1], "ControlMaster") == NULL);
+
+    /* ── ssh_build_readlink_argv ── */
+    char *rv[24];
+    char rpool[SSH_CMD_MAX];
+    assert(ssh_build_readlink_argv(&src, "/backup/latest", rv, 24, rpool, sizeof rpool) == 0);
+    assert(strcmp(rv[0], "ssh") == 0);
+    int rk = 0; while (rv[rk]) rk++;
+    assert(strstr(rv[rk - 1], "readlink -f '/backup/latest'") != NULL);
+
     printf("PASS: ssh builders + argv + quoting\n");
     return 0;
 }

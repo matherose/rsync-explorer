@@ -130,6 +130,8 @@ int ssh_build_find_argv(const source_t *src, const char *find_path,
                         char *pool, size_t pool_size)
 {
     if (src->type != SOURCE_REMOTE) return -1;
+    /* 15 argv entries (ssh,-i,key, 5x[-o,val], userhost, remote) + NULL;
+       require 18 for headroom. */
     if (argv_max < 18) return -1;
 
     /* pool layout: "user@host\0 remote-command\0" */
@@ -141,7 +143,7 @@ int ssh_build_find_argv(const source_t *src, const char *find_path,
     size_t rem_size   = pool_size - (size_t)(uh + 1);
     size_t pos        = 0;
     int    n;
-    char   q[1100];
+    char   q[SSH_CMD_MAX];
 
     if (ssh_shell_quote(find_path, q, sizeof q) != 0) return -1;
     n = snprintf(remote + pos, rem_size - pos, "find %s", q);
@@ -199,7 +201,7 @@ int ssh_build_ls_argv(const source_t *src, const char *path,
 
     char  *remote   = userhost + uh + 1;
     size_t rem_size = pool_size - (size_t)(uh + 1);
-    char   q[1100];
+    char   q[SSH_CMD_MAX];
 
     if (ssh_shell_quote(path, q, sizeof q) != 0) return -1;
     int n = snprintf(remote, rem_size, "ls -1 %s", q);
@@ -233,7 +235,7 @@ int ssh_build_readlink_argv(const source_t *src, const char *path,
 
     char  *remote   = userhost + uh + 1;
     size_t rem_size = pool_size - (size_t)(uh + 1);
-    char   q[1100];
+    char   q[SSH_CMD_MAX];
 
     if (ssh_shell_quote(path, q, sizeof q) != 0) return -1;
     int n = snprintf(remote, rem_size, "readlink -f %s", q);
