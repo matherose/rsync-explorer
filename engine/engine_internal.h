@@ -64,6 +64,12 @@ int  scan_dir_remote_parallel(const source_t *src,
                              const char *rel_path,
                              file_entry_array_t *out_arrays);
 
+/* ── Whole-tree scan (index.c) ── */
+
+/* Recursively list every entry (files AND directories) under a local snapshot
+   directory, with rel_path = path relative to snapshot_root. Returns 0/-1. */
+int scan_tree_local(const char *snapshot_root, file_entry_array_t *out);
+
 /* ── Classify (classify.c) ── */
 
 void classify_entries(file_entry_t **snap_entries,
