@@ -174,25 +174,40 @@ class FileListViewController: NSViewController,
             let icon = NSImageView()
             icon.image = iconForFile(file)
             icon.imageScaling = .scaleProportionallyDown
-            icon.frame = NSRect(x: 18, y: 2, width: 16, height: 16)
+            icon.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(icon)
 
             let label = NSTextField(labelWithString: displayName(file))
             label.font = NSFont.systemFont(ofSize: 13)
             label.lineBreakMode = .byTruncatingMiddle
-            label.frame = NSRect(x: 38, y: 0, width: 400, height: 20)
-            label.textColor = (file.classification == .deleted)
-                ? .systemRed
-                : .labelColor
+            label.textColor = (file.classification == .deleted) ? .systemRed : .labelColor
+            label.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(label)
+
+            NSLayoutConstraint.activate([
+                icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 18),
+                icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                icon.widthAnchor.constraint(equalToConstant: 16),
+                icon.heightAnchor.constraint(equalToConstant: 16),
+
+                label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 4),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
         } else {
             let label = NSTextField(labelWithString: valueForColumn(file, colId))
             label.font = NSFont.systemFont(ofSize: 11)
             label.lineBreakMode = .byTruncatingTail
-            label.alignment = colId == "size" || colId == "nlink" ? .right : .left
-            label.frame = NSRect(x: 4, y: 0, width: 200, height: 20)
+            label.alignment = (colId == "size" || colId == "nlink") ? .right : .left
             label.textColor = colId == "class" ? badgeColor(for: file.classification) : .secondaryLabelColor
+            label.translatesAutoresizingMaskIntoConstraints = false
             cell.addSubview(label)
+
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+                label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
         }
 
         return cell
