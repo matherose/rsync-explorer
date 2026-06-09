@@ -9,7 +9,9 @@
 static void write_file(const char *path, const char *content)
 {
     int fd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-    if (fd >= 0) { (void)write(fd, content, strlen(content)); close(fd); }
+    assert(fd >= 0);
+    (void)write(fd, content, strlen(content));
+    close(fd);
 }
 
 /* Returns 1 if the array has an entry whose rel_path equals `p`. */
@@ -39,6 +41,7 @@ static void test_scan_tree_local(void)
     assert(has_path(&a, "alpha.txt"));
     assert(has_path(&a, "docs"));            /* directory included */
     assert(has_path(&a, "docs/readme.md"));  /* full nested rel_path */
+    assert(a.count == 3);   /* exactly the 3 fixture entries, root excluded */
 
     for (int i = 0; i < a.count; i++) {
         if (strcmp(a.data[i].rel_path, "docs") == 0) assert(a.data[i].is_dir == 1);

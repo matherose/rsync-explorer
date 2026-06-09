@@ -3,6 +3,7 @@
  * @brief In-memory whole-backup index: build, classify, and query.
  */
 #include "engine_internal.h"
+#include <errno.h>
 #include <fts.h>
 
 /* ── Whole-tree local scan (files AND directories, full rel_paths) ── */
@@ -15,10 +16,11 @@ int scan_tree_local(const char *snapshot_root, file_entry_array_t *out)
 
     size_t base_len = strlen(snapshot_root);
 
+    errno = 0;
     FTSENT *ent;
     while ((ent = fts_read(fts)) != NULL) {
-        /* Visit each directory once (pre-order) and every file; skip the
-           snapshot root itself and unreadable entries. */
+        /* Visit each directory once (pre-order) and every file and symlink; skip
+           the snapshot root itself and unreadable entries. */
         if (ent->fts_info == FTS_DP) continue;                 /* dir post-order */
         if (ent->fts_info == FTS_DNR || ent->fts_info == FTS_ERR ||
             ent->fts_info == FTS_NS) continue;
@@ -47,6 +49,8 @@ int scan_tree_local(const char *snapshot_root, file_entry_array_t *out)
         if (fe_array_push(out, &fe) != 0) { fts_close(fts); return -1; }
     }
 
+    int saved_errno = errno;
     fts_close(fts);
+    if (saved_errno != 0) return -1;   /* fts_read I/O error, not just end-of-tree */
     return 0;
 }
