@@ -62,6 +62,10 @@ class MainWindowController: NSWindowController,
         buildUI()
         loadConfig()
         super.showWindow(sender)
+        // Resolve constraint-based layout so the split view has its real width
+        // before positioning the divider; otherwise the divider stays at 0 and
+        // the sidebar collapses behind the file list.
+        window?.layoutIfNeeded()
         splitView.setPosition(180, ofDividerAt: 0)
     }
 
@@ -178,7 +182,12 @@ class MainWindowController: NSWindowController,
         fileListVC.onNavigateDir = { [weak self] relPath in
             guard let self = self else { return }
             self.pathStack.append(self.currentPath)
-            self.currentPath = relPath
+            // The file list reports a leaf name (e.g. "src") relative to the
+            // current directory, so append it to form the full path rather than
+            // replacing (which would jump to a wrong root-level path).
+            self.currentPath = self.currentPath.isEmpty
+                ? relPath
+                : self.currentPath + "/" + relPath
             self.scanCurrentDir()
             self.expandCurrentTree()
         }
