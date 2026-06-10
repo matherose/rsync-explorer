@@ -79,7 +79,7 @@ int ssh_build_find_argv(const source_t *src, const char *find_path,
         if (n < 0 || (size_t)n >= rem_size - pos) return -1;
         pos += (size_t)n;
     }
-    if (ssh_shell_quote("%i\\t%m\\t%u\\t%g\\t%s\\t%T@\\t%n\\t%P\\n",
+    if (ssh_shell_quote("%i\\t%m\\t%u\\t%g\\t%s\\t%T@\\t%n\\t%y\\t%P\\n",
                         q, sizeof q) != 0) return -1;
     n = snprintf(remote + pos, rem_size - pos, " -printf %s", q);
     if (n < 0 || (size_t)n >= rem_size - pos) return -1;

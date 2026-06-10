@@ -57,17 +57,17 @@ int rsyncx_expand_tree(const source_t *src,
                 if (line[0] == '\0') continue;
 
                 /* Parse the same tab-delimited format */
-                char *fields[8] = {0};
+                char *fields[9] = {0};
                 int fc = 0;
                 char *tok = line;
-                for (int j = 0; j < 8; j++) {
+                for (int j = 0; j < 9; j++) {
                     fields[j] = tok;
                     char *tab = strchr(tok, '\t');
                     if (tab) { *tab = '\0'; tok = tab + 1; fc++; }
                     else { str_trim(tok); fc++; break; }
                 }
 
-                if (fc < 8 || fields[7][0] == '\0') continue;
+                if (fc < 9 || fields[8][0] == '\0') continue;
 
                 file_entry_t fe;
                 memset(&fe, 0, sizeof(fe));
@@ -78,8 +78,8 @@ int rsyncx_expand_tree(const source_t *src,
                 fe.size  = 0;  /* dir */
                 fe.mtime = strtoll(fields[5], NULL, 10);
                 fe.nlink = (uint32_t)strtoul(fields[6], NULL, 10);
-                str_copy(fe.rel_path, sizeof(fe.rel_path), fields[7]);
-                fe.is_dir = 1;
+                str_copy(fe.rel_path, sizeof(fe.rel_path), fields[8]);
+                fe.is_dir = (fields[7][0] == 'd') ? 1 : 0;   /* %y type letter */
 
                 fe_array_push(&snap_arrays[i], &fe);
             }

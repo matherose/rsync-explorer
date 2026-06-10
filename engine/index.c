@@ -63,13 +63,13 @@ static int parse_index_find_line(const char *line, file_entry_t *fe)
     char buf[4096];
     str_copy(buf, sizeof(buf), line);
 
-    char *fields[8] = {0};
+    char *fields[9] = {0};
     char *tok = buf;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 9; i++) {
         fields[i] = tok;
         char *tab = strchr(tok, '\t');
         if (tab) { *tab = '\0'; tok = tab + 1; }
-        else if (i < 7) return -1;
+        else if (i < 8) return -1;
     }
 
     memset(fe, 0, sizeof(*fe));
@@ -80,8 +80,8 @@ static int parse_index_find_line(const char *line, file_entry_t *fe)
     fe->size  = (uint64_t)strtoull(fields[4], NULL, 10);
     fe->mtime = (int64_t)strtoll(fields[5], NULL, 10);
     fe->nlink = (uint32_t)strtoul(fields[6], NULL, 10);
-    str_copy(fe->rel_path, sizeof(fe->rel_path), fields[7]);
-    fe->is_dir = S_ISDIR(fe->mode) ? 1 : 0;
+    fe->is_dir = (fields[7][0] == 'd') ? 1 : 0;   /* %y type letter */
+    str_copy(fe->rel_path, sizeof(fe->rel_path), fields[8]);
     if (fe->is_dir) fe->size = 0;
     return 0;
 }
