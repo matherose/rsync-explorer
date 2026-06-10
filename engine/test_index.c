@@ -133,9 +133,46 @@ static void test_index_children(void)
     printf("PASS: index children + classification\n");
 }
 
+static void test_index_dirs_and_search(void)
+{
+    char base[1024], s1[1024], s2[1024];
+    build_fixture(base, sizeof base, s1, sizeof s1, s2, sizeof s2);
+    source_t src = rsyncx_make_source("t", SOURCE_LOCAL, base, "", "", "");
+    snapshot_t snaps[2] = {
+        rsyncx_make_snapshot("snap1", s1, 1000),
+        rsyncx_make_snapshot("snap2", s2, 2000),
+    };
+    rsyncx_index_t *idx = rsyncx_build_index(&src, snaps, 2, 0, 1, NULL, NULL);
+    assert(idx != NULL);
+
+    /* dirs of root -> only "docs" */
+    dir_entry_t *dirs = NULL; int dn = 0;
+    assert(rsyncx_index_dirs(idx, "", &dirs, &dn) == 0);
+    int found_docs = 0;
+    for (int i = 0; i < dn; i++) if (strcmp(rsyncx_dir_name(&dirs[i]), "docs") == 0) found_docs = 1;
+    assert(found_docs == 1);
+    for (int i = 0; i < dn; i++) assert(dirs[i].is_dir == 1);
+    rsyncx_free(dirs);
+
+    /* search "readme" -> docs/readme.md (full path), files only */
+    lifecycle_t *res = NULL; int rn = 0;
+    assert(rsyncx_index_search(idx, "readme", &res, &rn) == 0);
+    int found = 0;
+    for (int i = 0; i < rn; i++) {
+        if (strcmp(res[i].rel_path, "docs/readme.md") == 0) { found = 1; assert(res[i].is_dir == 0); }
+    }
+    assert(found == 1);
+    rsyncx_free(res);
+
+    rsyncx_index_free(idx);
+    char rm[1200]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", base); (void)system(rm);
+    printf("PASS: index dirs + search\n");
+}
+
 int main(void)
 {
     test_scan_tree_local();
     test_index_children();
+    test_index_dirs_and_search();
     return 0;
 }

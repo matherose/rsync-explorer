@@ -244,3 +244,12 @@ void rsyncx_index_free(rsyncx_index_t *idx);
  */
 int rsyncx_index_children(const rsyncx_index_t *idx, const char *rel_path,
                           lifecycle_t **out, int *count);
+
+/** Child directories of rel_path (for the sidebar). Caller frees via rsyncx_free. */
+int rsyncx_index_dirs(const rsyncx_index_t *idx, const char *rel_path,
+                      dir_entry_t **out, int *count);
+
+/** Substring filename search across the whole tree, files only.
+    Output lifecycle_t[] carry the FULL rel_path. Caller frees via rsyncx_free. */
+int rsyncx_index_search(const rsyncx_index_t *idx, const char *query,
+                        lifecycle_t **out, int *count);

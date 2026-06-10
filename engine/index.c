@@ -407,3 +407,59 @@ int rsyncx_index_children(const rsyncx_index_t *ix, const char *rel_path,
     *out = arr; *count = n;
     return 0;
 }
+
+int rsyncx_index_dirs(const rsyncx_index_t *ix, const char *rel_path,
+                      dir_entry_t **out, int *count)
+{
+    if (!ix || !out || !count) return -1;
+    int head;
+    if (rel_path[0] == '\0' || strcmp(rel_path, "/") == 0) head = ix->root_child;
+    else {
+        int dir = idx_find(ix, rel_path);
+        head = (dir == IDX_NONE) ? IDX_NONE : ix->nodes[dir].first_child;
+    }
+
+    int n = 0;
+    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling)
+        if (ix->nodes[c].is_dir) n++;
+    dir_entry_t *arr = (n > 0) ? malloc((size_t)n * sizeof(dir_entry_t)) : NULL;
+    if (n > 0 && !arr) return -1;
+
+    int i = 0, last = ix->snap_count - 1;
+    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) {
+        const idx_node_t *nd = &ix->nodes[c];
+        if (!nd->is_dir) continue;
+        dir_entry_t d; memset(&d, 0, sizeof d);
+        str_copy(d.name, sizeof d.name, ix->pool + nd->name_off);
+        d.is_dir = 1;
+        d.exists_in_latest = present_get(nd, last) ? 1 : 0;
+        arr[i++] = d;
+    }
+    *out = arr; *count = n;
+    return 0;
+}
+
+int rsyncx_index_search(const rsyncx_index_t *ix, const char *query,
+                        lifecycle_t **out, int *count)
+{
+    if (!ix || !out || !count || !query) return -1;
+    if (query[0] == '\0') { *out = NULL; *count = 0; return 0; }
+
+    int n = 0;
+    for (int i = 0; i < ix->node_count; i++) {
+        const idx_node_t *nd = &ix->nodes[i];
+        if (nd->is_dir) continue;
+        if (strstr(ix->pool + nd->name_off, query)) n++;
+    }
+    lifecycle_t *arr = (n > 0) ? malloc((size_t)n * sizeof(lifecycle_t)) : NULL;
+    if (n > 0 && !arr) return -1;
+
+    int k = 0;
+    for (int i = 0; i < ix->node_count; i++) {
+        const idx_node_t *nd = &ix->nodes[i];
+        if (nd->is_dir) continue;
+        if (strstr(ix->pool + nd->name_off, query)) node_to_lifecycle(ix, i, 1, &arr[k++]);
+    }
+    *out = arr; *count = n;
+    return 0;
+}
