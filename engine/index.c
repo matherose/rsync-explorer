@@ -56,6 +56,25 @@ int scan_tree_local(const char *snapshot_root, file_entry_array_t *out)
     return 0;
 }
 
+/* Reject rel_paths that are empty (the snapshot root), absolute, contain a
+   ".." path component, or contain control bytes — these are unsafe to build a
+   real on-disk path from, or are the root entry the local scan also excludes. */
+static int rel_path_safe(const char *p)
+{
+    if (p[0] == '\0') return 0;       /* empty %P = the snapshot root itself */
+    if (p[0] == '/')  return 0;       /* must be relative to the snapshot root */
+    for (const char *c = p; *c; c++)
+        if ((unsigned char)*c < 0x20) return 0;   /* control bytes (incl stray newline frags) */
+    const char *s = p;
+    while (s) {
+        const char *slash = strchr(s, '/');
+        size_t seg = slash ? (size_t)(slash - s) : strlen(s);
+        if (seg == 2 && s[0] == '.' && s[1] == '.') return 0;  /* ".." component */
+        s = slash ? slash + 1 : NULL;
+    }
+    return 1;
+}
+
 /* Parse one `find -printf "%i\t%m\t%u\t%g\t%s\t%T@\t%n\t%P"` line into fe.
    %m is octal (find prints mode in octal), so st_mode is parsed base 8. */
 static int parse_index_find_line(const char *line, file_entry_t *fe)
@@ -81,7 +100,9 @@ static int parse_index_find_line(const char *line, file_entry_t *fe)
     fe->mtime = (int64_t)strtoll(fields[5], NULL, 10);
     fe->nlink = (uint32_t)strtoul(fields[6], NULL, 10);
     fe->is_dir = (fields[7][0] == 'd') ? 1 : 0;   /* %y type letter */
+    if (strlen(fields[8]) >= sizeof(fe->rel_path)) return -1;   /* would truncate */
     str_copy(fe->rel_path, sizeof(fe->rel_path), fields[8]);
+    if (!rel_path_safe(fe->rel_path)) return -1;
     if (fe->is_dir) fe->size = 0;
     return 0;
 }
@@ -109,7 +130,9 @@ static int scan_tree_remote(const source_t *src, const char *root,
         if (parse_index_find_line(line, &fe) != 0) continue;
         if (fe_array_push(out, &fe) != 0) { ssh_spawn_reap(fp, pid); return -1; }
     }
-    ssh_spawn_reap(fp, pid);
+    int status = ssh_spawn_reap(fp, pid);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+        return -1;   /* SSH/find failed or was signaled — treat as scan failure */
     return 0;
 }
 
@@ -386,10 +409,9 @@ rsyncx_index_t *rsyncx_build_index(const source_t *src,
         } else {
             rc = scan_tree_local(snaps[from_idx + i].full_path, &a);
         }
-        if (rc == 0) {
-            if (merge_snapshot(ix, i, &a) != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
-            files_so_far += a.count;
-        }
+        if (rc != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
+        if (merge_snapshot(ix, i, &a) != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
+        files_so_far += a.count;
         fe_array_free(&a);
         if (progress_cb) progress_cb(i + 1, range, files_so_far, ctx);
     }
