@@ -5,6 +5,7 @@
 #include "engine_internal.h"
 #include <errno.h>
 #include <fts.h>
+#include <sys/wait.h>
 
 /* ── Whole-tree local scan (files AND directories, full rel_paths) ── */
 
@@ -55,13 +56,61 @@ int scan_tree_local(const char *snapshot_root, file_entry_array_t *out)
     return 0;
 }
 
-/* Remote scan is implemented in a later task; stub returns -1 for now so a
-   remote build simply yields an empty index until then. */
+/* Parse one `find -printf "%i\t%m\t%u\t%g\t%s\t%T@\t%n\t%P"` line into fe.
+   %m is octal (find prints mode in octal), so st_mode is parsed base 8. */
+static int parse_index_find_line(const char *line, file_entry_t *fe)
+{
+    char buf[4096];
+    str_copy(buf, sizeof(buf), line);
+
+    char *fields[8] = {0};
+    char *tok = buf;
+    for (int i = 0; i < 8; i++) {
+        fields[i] = tok;
+        char *tab = strchr(tok, '\t');
+        if (tab) { *tab = '\0'; tok = tab + 1; }
+        else if (i < 7) return -1;
+    }
+
+    memset(fe, 0, sizeof(*fe));
+    fe->inode = (uint64_t)strtoull(fields[0], NULL, 10);
+    fe->mode  = (uint32_t)strtoul(fields[1], NULL, 8);   /* %m is octal */
+    str_copy(fe->user,  sizeof(fe->user),  fields[2]);
+    str_copy(fe->group, sizeof(fe->group), fields[3]);
+    fe->size  = (uint64_t)strtoull(fields[4], NULL, 10);
+    fe->mtime = (int64_t)strtoll(fields[5], NULL, 10);
+    fe->nlink = (uint32_t)strtoul(fields[6], NULL, 10);
+    str_copy(fe->rel_path, sizeof(fe->rel_path), fields[7]);
+    fe->is_dir = S_ISDIR(fe->mode) ? 1 : 0;
+    if (fe->is_dir) fe->size = 0;
+    return 0;
+}
+
+/* Recursive remote scan of one snapshot: ssh ... 'find <root> -printf ...'
+   with no -maxdepth and no -type filter, so files AND directories are listed. */
 static int scan_tree_remote(const source_t *src, const char *root,
                             file_entry_array_t *out)
 {
-    (void)src; (void)root; (void)out;
-    return -1;
+    char *argv[24];
+    char  pool[SSH_CMD_MAX];
+    pid_t pid = -1;
+    if (ssh_build_find_argv(src, root, -1, NULL, NULL,
+                            argv, 24, pool, sizeof pool) != 0)
+        return -1;
+
+    FILE *fp = ssh_spawn_capture(argv, &pid);
+    if (!fp) return -1;
+
+    char line[4096];
+    while (fgets(line, sizeof(line), fp)) {
+        str_trim(line);
+        if (line[0] == '\0') continue;
+        file_entry_t fe;
+        if (parse_index_find_line(line, &fe) != 0) continue;
+        if (fe_array_push(out, &fe) != 0) { ssh_spawn_reap(fp, pid); return -1; }
+    }
+    ssh_spawn_reap(fp, pid);
+    return 0;
 }
 
 /* ── Compact node store + open-addressing path→node hash map ── */
