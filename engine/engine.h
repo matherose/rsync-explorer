@@ -61,7 +61,7 @@ typedef struct {
     int64_t      first_backup;     /**< Epoch of earliest snapshot containing file */
     int64_t      last_backup;      /**< Epoch of latest snapshot containing file */
     int64_t      deleted_in;       /**< Epoch of first snapshot without file, or -1 */
-    char         last_real_path[512]; /**< Absolute path in last snapshot that has it */
+    char         last_real_path[1100]; /**< Absolute path in last snapshot that has it */
     uint8_t      is_dir;           /**< 1 if directory, 0 if regular file */
     uint32_t     nlink;            /**< Hard link count */
 } lifecycle_t;

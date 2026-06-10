@@ -236,6 +236,8 @@ static int merge_snapshot(rsyncx_index_t *ix, int s, const file_entry_array_t *a
         else if (!fe->is_dir && fe->inode != 0 && nd->first_inode != 0 &&
                  fe->inode != nd->first_inode) nd->modified = 1;
 
+        /* Snapshots are merged in ascending index order (see rsyncx_build_index),
+           so the highest s seen is the latest present snapshot — its metadata wins. */
         if (s >= nd->last_idx) {
             nd->last_idx = s;
             nd->mode = fe->mode; nd->size = fe->size; nd->mtime = fe->mtime;
