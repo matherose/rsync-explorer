@@ -220,3 +220,27 @@ void rsyncx_free(void *ptr);
 
 /** Opaque whole-backup index handle (see index.c). */
 typedef struct rsyncx_index rsyncx_index_t;
+
+/**
+ * Build the in-memory index over snapshots [from_idx, to_idx].
+ * One recursive scan per snapshot (local fts / parallel remote SSH).
+ * progress_cb (nullable) is called as snapshots complete:
+ *   progress_cb(done_snapshots, total_snapshots, files_so_far, ctx).
+ * Returns an index handle (free with rsyncx_index_free), or NULL on error.
+ */
+rsyncx_index_t *rsyncx_build_index(const source_t *src,
+                                   const snapshot_t *snaps, int snap_count,
+                                   int from_idx, int to_idx,
+                                   void (*progress_cb)(int, int, long, void *),
+                                   void *ctx);
+
+/** Free an index built by rsyncx_build_index. */
+void rsyncx_index_free(rsyncx_index_t *idx);
+
+/**
+ * Children (files AND directories) of directory rel_path ("" = root).
+ * Output lifecycle_t[] carry the LEAF name in rel_path. Caller frees via rsyncx_free.
+ * Returns 0/-1.
+ */
+int rsyncx_index_children(const rsyncx_index_t *idx, const char *rel_path,
+                          lifecycle_t **out, int *count);

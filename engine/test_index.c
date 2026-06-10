@@ -53,8 +53,89 @@ static void test_scan_tree_local(void)
     printf("PASS: scan_tree_local lists files + dirs with full rel_paths\n");
 }
 
+/* Build a 2-snapshot hard-linked fixture; fills base/snap1/snap2 paths.
+   alpha.txt UNCHANGED (hardlinked), gamma.txt DELETED (snap1 only),
+   beta.txt NEW (snap2 only), mod.txt MODIFIED (both, distinct inodes),
+   docs UNCHANGED dir, docs/readme.md UNCHANGED (hardlinked). */
+static void build_fixture(char *base_out, size_t base_sz,
+                          char *snap1_out, size_t s1_sz,
+                          char *snap2_out, size_t s2_sz)
+{
+    char tmpl[] = "/tmp/rsyncx_idx2_XXXXXX";
+    char *base = mkdtemp(tmpl);
+    assert(base != NULL);
+    str_copy(base_out, base_sz, base);
+
+    char s1[1024], s2[1024], p[1100], q[1100];
+    snprintf(s1, sizeof s1, "%s/snap1", base);
+    snprintf(s2, sizeof s2, "%s/snap2", base);
+    assert(mkdir(s1, 0755) == 0);
+    assert(mkdir(s2, 0755) == 0);
+    str_copy(snap1_out, s1_sz, s1);
+    str_copy(snap2_out, s2_sz, s2);
+
+    char d1[1100], d2[1100];
+    snprintf(d1, sizeof d1, "%s/docs", s1); assert(mkdir(d1, 0755) == 0);
+    snprintf(d2, sizeof d2, "%s/docs", s2); assert(mkdir(d2, 0755) == 0);
+
+    snprintf(p, sizeof p, "%s/alpha.txt", s1); write_file(p, "A");
+    snprintf(q, sizeof q, "%s/alpha.txt", s2); assert(link(p, q) == 0);
+    snprintf(p, sizeof p, "%s/docs/readme.md", s1); write_file(p, "R");
+    snprintf(q, sizeof q, "%s/docs/readme.md", s2); assert(link(p, q) == 0);
+    snprintf(p, sizeof p, "%s/gamma.txt", s1); write_file(p, "G");
+    snprintf(p, sizeof p, "%s/beta.txt", s2); write_file(p, "B");
+    snprintf(p, sizeof p, "%s/mod.txt", s1); write_file(p, "v1");
+    snprintf(p, sizeof p, "%s/mod.txt", s2); write_file(p, "v2-different");
+}
+
+static lifecycle_t *find_lc(lifecycle_t *a, int n, const char *leaf)
+{
+    for (int i = 0; i < n; i++) if (strcmp(a[i].rel_path, leaf) == 0) return &a[i];
+    return NULL;
+}
+
+static void test_index_children(void)
+{
+    char base[1024], s1[1024], s2[1024];
+    build_fixture(base, sizeof base, s1, sizeof s1, s2, sizeof s2);
+
+    source_t src = rsyncx_make_source("t", SOURCE_LOCAL, base, "", "", "");
+    snapshot_t snaps[2] = {
+        rsyncx_make_snapshot("snap1", s1, 1000),
+        rsyncx_make_snapshot("snap2", s2, 2000),
+    };
+
+    rsyncx_index_t *idx = rsyncx_build_index(&src, snaps, 2, 0, 1, NULL, NULL);
+    assert(idx != NULL);
+
+    lifecycle_t *out = NULL; int n = 0;
+    assert(rsyncx_index_children(idx, "", &out, &n) == 0);
+
+    lifecycle_t *alpha = find_lc(out, n, "alpha.txt");
+    lifecycle_t *gamma = find_lc(out, n, "gamma.txt");
+    lifecycle_t *beta  = find_lc(out, n, "beta.txt");
+    lifecycle_t *mod   = find_lc(out, n, "mod.txt");
+    lifecycle_t *docs  = find_lc(out, n, "docs");
+    assert(alpha && alpha->class == CLASS_UNCHANGED && alpha->is_dir == 0);
+    assert(gamma && gamma->class == CLASS_DELETED);
+    assert(beta  && beta->class  == CLASS_NEW);
+    assert(mod   && mod->class   == CLASS_MODIFIED);
+    assert(docs  && docs->is_dir == 1 && docs->class == CLASS_UNCHANGED);
+    rsyncx_free(out);
+
+    assert(rsyncx_index_children(idx, "docs", &out, &n) == 0);
+    lifecycle_t *readme = find_lc(out, n, "readme.md");
+    assert(readme && readme->class == CLASS_UNCHANGED);
+    rsyncx_free(out);
+
+    rsyncx_index_free(idx);
+    char rm[1200]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", base); (void)system(rm);
+    printf("PASS: index children + classification\n");
+}
+
 int main(void)
 {
     test_scan_tree_local();
+    test_index_children();
     return 0;
 }
