@@ -4,6 +4,7 @@
  */
 
 #include "engine_internal.h"
+#include <errno.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -205,6 +206,10 @@ int ssh_spawn_reap(FILE *fp, pid_t pid)
 {
     if (fp) fclose(fp);
     int status = 0;
-    if (pid > 0) waitpid(pid, &status, 0);
+    if (pid > 0) {
+        pid_t r;
+        do { r = waitpid(pid, &status, 0); } while (r < 0 && errno == EINTR);
+        if (r < 0) return -1;   /* outcome unknown — callers must treat as failure */
+    }
     return status;
 }

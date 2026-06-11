@@ -62,9 +62,10 @@ int rsyncx_expand_tree(const source_t *src,
                 char *tok = line;
                 for (int j = 0; j < 9; j++) {
                     fields[j] = tok;
+                    if (j == 8) { str_trim(tok); fc++; break; }   /* %P may contain tabs */
                     char *tab = strchr(tok, '\t');
-                    if (tab) { *tab = '\0'; tok = tab + 1; fc++; }
-                    else { str_trim(tok); fc++; break; }
+                    if (!tab) break;
+                    *tab = '\0'; tok = tab + 1; fc++;
                 }
 
                 if (fc < 9 || fields[8][0] == '\0') continue;

@@ -21,9 +21,10 @@ static int parse_find_line(const char *line, file_entry_t *fe)
     char *tok = buf;
     for (int i = 0; i < 9; i++) {
         fields[i] = tok;
+        if (i == 8) { str_trim(tok); field_count++; break; }   /* %P may contain tabs */
         char *tab = strchr(tok, '\t');
-        if (tab) { *tab = '\0'; tok = tab + 1; field_count++; }
-        else { str_trim(tok); field_count++; break; }
+        if (!tab) break;
+        *tab = '\0'; tok = tab + 1; field_count++;
     }
 
     if (field_count < 9) return -1;

@@ -75,7 +75,7 @@ static int rel_path_safe(const char *p)
     return 1;
 }
 
-/* Parse one `find -printf "%i\t%m\t%u\t%g\t%s\t%T@\t%n\t%P"` line into fe.
+/* Parse one `find -printf "%i\t%m\t%u\t%g\t%s\t%T@\t%n\t%y\t%P"` line into fe.
    %m is octal (find prints mode in octal), so st_mode is parsed base 8. */
 static int parse_index_find_line(const char *line, file_entry_t *fe)
 {
@@ -86,9 +86,10 @@ static int parse_index_find_line(const char *line, file_entry_t *fe)
     char *tok = buf;
     for (int i = 0; i < 9; i++) {
         fields[i] = tok;
+        if (i == 8) break;   /* %P is last and may itself contain tabs */
         char *tab = strchr(tok, '\t');
-        if (tab) { *tab = '\0'; tok = tab + 1; }
-        else if (i < 8) return -1;
+        if (!tab) return -1;
+        *tab = '\0'; tok = tab + 1;
     }
 
     memset(fe, 0, sizeof(*fe));

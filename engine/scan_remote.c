@@ -18,16 +18,16 @@ static int parse_find_line(const char *line, file_entry_t *fe)
     char *tok = buf;
     for (int i = 0; i < 9; i++) {
         fields[i] = tok;
-        char *tab = strchr(tok, '\t');
-        if (tab) {
-            *tab = '\0';
-            tok = tab + 1;
-            field_count++;
-        } else {
+        if (i == 8) {   /* %P is last and may itself contain tabs */
             str_trim(tok);
             field_count++;
             break;
         }
+        char *tab = strchr(tok, '\t');
+        if (!tab) break;
+        *tab = '\0';
+        tok = tab + 1;
+        field_count++;
     }
 
     if (field_count < 9) return -1;
