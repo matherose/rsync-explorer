@@ -10,3 +10,13 @@ project('rsync-explorer', 'c', 'swift',
 
 subdir('engine')
 subdir('app')
+
+custom_target('app-bundle',
+  input: [rsync_explorer_exe, files('Info.plist'), files('config.ini')],
+  output: 'rsync-explorer.app',
+  command: [
+    files('scripts/make_bundle.sh'),
+    '@INPUT0@', '@INPUT1@', '@INPUT2@', '@OUTPUT@',
+  ],
+  build_by_default: true,
+)
