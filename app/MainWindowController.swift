@@ -20,6 +20,8 @@ class MainWindowController: NSWindowController,
     private var currentPath: String = ""
     private var fromIdx: Int = 0
     private var toIdx: Int = 0
+    /// In-memory whole-backup index (engine-owned; freed on rebuild/close).
+    private var index: OpaquePointer?
 
     // Subviews
     private let splitView = NSSplitView()
@@ -44,7 +46,7 @@ class MainWindowController: NSWindowController,
 
     // Navigation stack
     private var pathStack: [String] = []
-    private var searchGeneration = 0
+    private var indexGeneration = 0
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
@@ -67,6 +69,12 @@ class MainWindowController: NSWindowController,
         // the sidebar collapses behind the file list.
         window?.layoutIfNeeded()
         splitView.setPosition(180, ofDividerAt: 0)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // Invalidate any in-flight build so its completion frees its own index.
+        indexGeneration += 1
+        if let idx = index { EngineBridge.freeIndex(idx); index = nil }
     }
 
     // MARK: - UI construction
@@ -296,6 +304,47 @@ class MainWindowController: NSWindowController,
                 self.toIdx = snaps.count - 1
                 self.timelineView.fromIdx = 0
                 self.timelineView.toIdx = snaps.count - 1
+                self.rebuildIndex()
+            }
+        }
+    }
+
+    // MARK: - Index building
+
+    private func rebuildIndex() {
+        guard let source = currentSource, !snapshots.isEmpty else { return }
+        if let old = index { EngineBridge.freeIndex(old); index = nil }
+        indexGeneration += 1
+        let generation = indexGeneration
+
+        let snaps = snapshots
+        let from = timelineVisible ? fromIdx : 0
+        let to   = timelineVisible ? toIdx   : max(0, snaps.count - 1)
+        statusBar.startLoading()
+        statusBar.update(files: 0, deleted: 0, modified: 0, new: 0, unchanged: 0)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let idx = EngineBridge.buildIndex(source: source, snapshots: snaps,
+                                              fromIdx: from, toIdx: to) { _, _, files in
+                DispatchQueue.main.async {
+                    guard let self = self, generation == self.indexGeneration else { return }
+                    self.statusBar.update(files: files, deleted: 0, modified: 0,
+                                          new: 0, unchanged: 0)
+                }
+            }
+            DispatchQueue.main.async {
+                guard let self = self, generation == self.indexGeneration else {
+                    // Window closed or a newer rebuild superseded this one.
+                    if let idx = idx { EngineBridge.freeIndex(idx) }
+                    return
+                }
+                self.statusBar.stopLoading()
+                guard let idx = idx else {
+                    self.showAlert(title: "Indexing Failed",
+                                   message: "Couldn't index \(source.name).")
+                    return
+                }
+                self.index = idx
                 self.scanCurrentDir()
                 self.expandCurrentTree()
             }
@@ -306,57 +355,22 @@ class MainWindowController: NSWindowController,
 
     private func scanCurrentDir() {
         updateBreadcrumb()
-        guard let source = currentSource, !snapshots.isEmpty else { return }
-        statusBar.startLoading()
-
-        let path = currentPath
-        let from = fromIdx
-        let to = toIdx
-        let snaps = snapshots
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let files = EngineBridge.scanDir(source: source, snapshots: snaps,
-                                              relPath: path,
-                                              fromIdx: from, toIdx: to)
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.statusBar.stopLoading()
-                guard let files = files else {
-                    self.fileListVC.updateFiles([])
-                    self.statusBar.update(files: 0, deleted: 0, modified: 0, new: 0, unchanged: 0)
-                    return
-                }
-                self.fileListVC.updateFiles(files)
-                let deleted   = files.filter { $0.classification == .deleted }.count
-                let delNew    = files.filter { $0.classification == .delNew }.count
-                let modified  = files.filter { $0.classification == .modified }.count
-                let newFiles  = files.filter { $0.classification == .isNew }.count
-                let unchanged = files.filter { $0.classification == .unchanged }.count
-                self.statusBar.update(files: files.count,
-                                       deleted: deleted + delNew,
-                                       modified: modified,
-                                       new: newFiles,
-                                       unchanged: unchanged)
-            }
-        }
+        guard let idx = index else { return }
+        let files = EngineBridge.indexChildren(idx, relPath: currentPath)
+        fileListVC.updateFiles(files)
+        let deleted   = files.filter { $0.classification == .deleted }.count
+        let delNew    = files.filter { $0.classification == .delNew }.count
+        let modified  = files.filter { $0.classification == .modified }.count
+        let newFiles  = files.filter { $0.classification == .isNew }.count
+        let unchanged = files.filter { $0.classification == .unchanged }.count
+        statusBar.update(files: files.count, deleted: deleted + delNew,
+                         modified: modified, new: newFiles, unchanged: unchanged)
     }
 
     private func expandCurrentTree() {
-        guard let source = currentSource, !snapshots.isEmpty else { return }
-        let path = currentPath
-        let from = fromIdx
-        let to = toIdx
-        let snaps = snapshots
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let dirs = EngineBridge.expandTree(source: source, snapshots: snaps,
-                                                relPath: path,
-                                                fromIdx: from, toIdx: to)
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.sidebarVC.updateEntries(dirs ?? [], currentPath: path)
-            }
-        }
+        guard let idx = index else { return }
+        let dirs = EngineBridge.indexDirs(idx, relPath: currentPath)
+        sidebarVC.updateEntries(dirs, currentPath: currentPath)
     }
 
     // MARK: - SidebarDelegate
@@ -382,8 +396,7 @@ class MainWindowController: NSWindowController,
     func timelineRangeChanged(from: Int, to: Int) {
         fromIdx = from
         toIdx = to
-        scanCurrentDir()
-        expandCurrentTree()
+        rebuildIndex()
     }
 
     @objc func toggleTimeline(_ sender: Any?) {
@@ -395,8 +408,7 @@ class MainWindowController: NSWindowController,
             toIdx = max(0, snapshots.count - 1)
             timelineView.fromIdx = fromIdx
             timelineView.toIdx = toIdx
-            scanCurrentDir()
-            expandCurrentTree()
+            rebuildIndex()
         }
     }
 
@@ -421,40 +433,16 @@ class MainWindowController: NSWindowController,
 
     @objc private func searchSubmitted() {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty, let source = currentSource else { return }
-        statusBar.startLoading()
-        searchGeneration += 1
-        let generation = searchGeneration
-
-        let snaps = snapshots
-        let from = timelineVisible ? fromIdx : 0
-        let to   = timelineVisible ? toIdx   : max(0, snaps.count - 1)
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let results = EngineBridge.search(source: source, snapshots: snaps,
-                                               query: query,
-                                               fromIdx: from, toIdx: to)
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                guard generation == self.searchGeneration else { return } // stale search; discard
-                self.statusBar.stopLoading()
-                guard let results = results else {
-                    self.fileListVC.updateFiles([])
-                    return
-                }
-                self.fileListVC.updateFiles(results)
-                let deleted   = results.filter { $0.classification == .deleted }.count
-                let delNew    = results.filter { $0.classification == .delNew }.count
-                let modified  = results.filter { $0.classification == .modified }.count
-                let newFiles  = results.filter { $0.classification == .isNew }.count
-                let unchanged = results.filter { $0.classification == .unchanged }.count
-                self.statusBar.update(files: results.count,
-                                       deleted: deleted + delNew,
-                                       modified: modified,
-                                       new: newFiles,
-                                       unchanged: unchanged)
-            }
-        }
+        guard !query.isEmpty, let idx = index else { return }
+        let results = EngineBridge.indexSearch(idx, query: query)
+        fileListVC.updateFiles(results)
+        let deleted   = results.filter { $0.classification == .deleted }.count
+        let delNew    = results.filter { $0.classification == .delNew }.count
+        let modified  = results.filter { $0.classification == .modified }.count
+        let newFiles  = results.filter { $0.classification == .isNew }.count
+        let unchanged = results.filter { $0.classification == .unchanged }.count
+        statusBar.update(files: results.count, deleted: deleted + delNew,
+                         modified: modified, new: newFiles, unchanged: unchanged)
     }
 
     // MARK: - FileListDownloadDelegate
