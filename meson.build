@@ -9,3 +9,4 @@ project('rsync-explorer', 'c', 'swift',
 )
 
 subdir('engine')
+subdir('app')
