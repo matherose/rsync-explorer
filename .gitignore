@@ -3,3 +3,18 @@
 
 # Visual brainstorming companion
 .superpowers/
+
+# Meson/Ninja out-of-tree build
+build/
+
+# Stray compiler outputs (should never exist in-tree anymore)
+*.o
+*.a
+*.dSYM/
+engine/test_search
+engine/test_ssh
+engine/test_index
+engine/test_engine
+engine/test_engine_full
+/rsync-explorer
+/rsync-explorer.app/
