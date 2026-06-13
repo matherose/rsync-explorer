@@ -238,6 +238,14 @@ rsyncx_index_t *rsyncx_build_index(const source_t *src,
 void rsyncx_index_free(rsyncx_index_t *idx);
 
 /**
+ * Reclassify the index for snapshot range [from_idx, to_idx] (indices into
+ * the ORIGINAL snapshot array passed to rsyncx_build_index). In-memory only:
+ * no rescan. Nodes absent from the range become invisible to the index
+ * queries. Returns 0, or -1 on invalid arguments.
+ */
+int rsyncx_index_set_range(rsyncx_index_t *idx, int from_idx, int to_idx);
+
+/**
  * Children (files AND directories) of directory rel_path ("" = root).
  * Output lifecycle_t[] carry the LEAF name in rel_path. Caller frees via rsyncx_free.
  * Returns 0/-1.

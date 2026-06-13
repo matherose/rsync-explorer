@@ -135,10 +135,12 @@ typedef struct {
     uint32_t nlink;
     int      user_id, group_id;
 
-    int      first_idx, last_idx;
+    int      first_idx, last_idx;     /* first/last present IN CURRENT RANGE (set_range) */
     uint64_t present_lo, present_hi;  /* presence bitmap over <=128 snapshots */
-    uint64_t first_inode;             /* inode in first present snapshot */
-    uint8_t  modified;                /* inode changed across present snapshots */
+    uint64_t changed_lo, changed_hi;  /* inode differed from previous present snapshot */
+    uint64_t last_seen_inode;         /* inode at the latest merged present snapshot */
+    uint8_t  in_range;                /* visible in the current range (set_range) */
+    int      merge_last_idx;          /* latest snapshot merged so far (build only) */
     uint8_t  is_dir;
     uint8_t  klass;                   /* file_class_t, set in finalize */
     int64_t  deleted_in;              /* epoch or -1, set in finalize */
@@ -161,6 +163,8 @@ struct rsyncx_index {
 
     int         snap_count;       /* range length */
     snapshot_t *snaps;            /* copy of snaps[from_idx..to_idx] */
+    int         snap_base;        /* offset of snaps[0] in the caller's array */
+    int         range_from, range_to;  /* current range, ix-relative */
 };
 
 static uint32_t fnv1a(const char *s)
@@ -255,7 +259,7 @@ static int idx_intern(rsyncx_index_t *ix, const char *path)
     idx_node_t *nd = &ix->nodes[node];
     memset(nd, 0, sizeof(*nd));
     nd->parent = nd->first_child = nd->next_sibling = IDX_NONE;
-    nd->first_idx = -1; nd->last_idx = -1;
+    nd->first_idx = -1; nd->last_idx = -1; nd->merge_last_idx = -1;
     nd->deleted_in = -1;
     if (pool_add(ix, path, &nd->path_off) != 0) { ix->node_count--; return IDX_NONE; }
     const char *full = ix->pool + nd->path_off;
@@ -277,6 +281,45 @@ static int present_get(const idx_node_t *nd, int s)
                   : (int)((nd->present_hi >> (s - 64)) & 1);
 }
 
+static void changed_set(idx_node_t *nd, int s)
+{
+    if (s < 64) nd->changed_lo |= (uint64_t)1 << s;
+    else        nd->changed_hi |= (uint64_t)1 << (s - 64);
+}
+
+/* bits a..b within one 64-bit word; 0 if a > b. a,b in [0,63]. */
+static uint64_t bit_run(int a, int b)
+{
+    if (a > b) return 0;
+    uint64_t m = (b - a >= 63) ? ~UINT64_C(0) : ((UINT64_C(1) << (b - a + 1)) - 1);
+    return m << a;
+}
+
+/* mask lo/hi down to bits [from, to] (0..127). */
+static void mask_range(uint64_t *lo, uint64_t *hi, int from, int to)
+{
+    *lo &= (from <= 63) ? bit_run(from, to < 63 ? to : 63) : 0;
+    *hi &= (to >= 64) ? bit_run(from >= 64 ? from - 64 : 0, to - 64) : 0;
+}
+
+static int bits_first(uint64_t lo, uint64_t hi)
+{
+    return lo ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
+}
+
+static int bits_last(uint64_t lo, uint64_t hi)
+{
+    return hi ? 127 - __builtin_clzll(hi) : 63 - __builtin_clzll(lo);
+}
+
+/* presence (lo,hi) is exactly the solid run [first, last]? */
+static int bits_contiguous(uint64_t lo, uint64_t hi, int first, int last)
+{
+    uint64_t elo = (first <= 63) ? bit_run(first, last < 63 ? last : 63) : 0;
+    uint64_t ehi = (last >= 64) ? bit_run(first >= 64 ? first - 64 : 0, last - 64) : 0;
+    return lo == elo && hi == ehi;
+}
+
 static int merge_snapshot(rsyncx_index_t *ix, int s, const file_entry_array_t *a)
 {
     for (int e = 0; e < a->count; e++) {
@@ -286,14 +329,15 @@ static int merge_snapshot(rsyncx_index_t *ix, int s, const file_entry_array_t *a
         idx_node_t *nd = &ix->nodes[node];
 
         present_set(nd, s);
-        if (nd->first_idx < 0) { nd->first_idx = s; nd->first_inode = fe->inode; }
-        else if (!fe->is_dir && fe->inode != 0 && nd->first_inode != 0 &&
-                 fe->inode != nd->first_inode) nd->modified = 1;
+        if (nd->merge_last_idx >= 0 && !fe->is_dir && fe->inode != 0 &&
+            nd->last_seen_inode != 0 && fe->inode != nd->last_seen_inode)
+            changed_set(nd, s);
+        if (fe->inode != 0) nd->last_seen_inode = fe->inode;
 
         /* Snapshots are merged in ascending index order (see rsyncx_build_index),
            so the highest s seen is the latest present snapshot — its metadata wins. */
-        if (s >= nd->last_idx) {
-            nd->last_idx = s;
+        if (s >= nd->merge_last_idx) {
+            nd->merge_last_idx = s;
             nd->mode = fe->mode; nd->size = fe->size; nd->mtime = fe->mtime;
             nd->nlink = fe->nlink; nd->is_dir = fe->is_dir;
             nd->user_id = intern_owner(ix, fe->user);
@@ -303,38 +347,11 @@ static int merge_snapshot(rsyncx_index_t *ix, int s, const file_entry_array_t *a
     return 0;
 }
 
-static void finalize(rsyncx_index_t *ix)
+static void link_tree(rsyncx_index_t *ix)
 {
-    int sc = ix->snap_count;
     ix->root_child = IDX_NONE;
-
     for (int i = 0; i < ix->node_count; i++) {
         idx_node_t *nd = &ix->nodes[i];
-
-        int had_absence = 0, last_present = -1;
-        file_class_t cls = CLASS_UNCHANGED;
-        int del_at = -1, decided = 0;
-        for (int s = 0; s < sc; s++) {
-            if (present_get(nd, s)) {
-                if (had_absence && last_present >= 0) { cls = CLASS_DEL_NEW; decided = 1; break; }
-                last_present = s;
-            } else if (last_present >= 0) had_absence = 1;
-        }
-        if (!decided) {
-            if (!present_get(nd, sc - 1)) {
-                if (nd->last_idx + 1 < sc) del_at = nd->last_idx + 1;
-                cls = CLASS_DELETED;
-            } else if (nd->first_idx == sc - 1) {
-                cls = CLASS_NEW;
-            } else if (nd->modified) {
-                cls = CLASS_MODIFIED;
-            } else {
-                cls = CLASS_UNCHANGED;
-            }
-        }
-        nd->klass = (uint8_t)cls;
-        nd->deleted_in = (del_at >= 0) ? ix->snaps[del_at].date_epoch : -1;
-
         const char *full = ix->pool + nd->path_off;
         const char *slash = strrchr(full, '/');
         if (!slash) {
@@ -360,25 +377,65 @@ static void finalize(rsyncx_index_t *ix)
     }
 }
 
+int rsyncx_index_set_range(rsyncx_index_t *ix, int from_idx, int to_idx)
+{
+    if (!ix) return -1;
+    int from = from_idx - ix->snap_base;
+    int to   = to_idx   - ix->snap_base;
+    if (from < 0) from = 0;
+    if (to >= ix->snap_count) to = ix->snap_count - 1;
+    if (to < 0 || from > to) return -1;
+    ix->range_from = from; ix->range_to = to;
+
+    for (int i = 0; i < ix->node_count; i++) {
+        idx_node_t *nd = &ix->nodes[i];
+
+        uint64_t plo = nd->present_lo, phi = nd->present_hi;
+        mask_range(&plo, &phi, from, to);
+        if (plo == 0 && phi == 0) { nd->in_range = 0; continue; }
+        nd->in_range = 1;
+
+        int first = bits_first(plo, phi);
+        int last  = bits_last(plo, phi);
+        nd->first_idx = first;
+        nd->last_idx  = last;
+
+        file_class_t cls;
+        if (!bits_contiguous(plo, phi, first, last)) {
+            cls = CLASS_DEL_NEW;          /* gap: present, absent, present again */
+        } else if (last < to) {
+            cls = CLASS_DELETED;          /* absent at range end */
+        } else if (first == to) {
+            cls = CLASS_NEW;              /* first appeared at range end */
+        } else {
+            uint64_t clo = nd->changed_lo, chi = nd->changed_hi;
+            mask_range(&clo, &chi, first + 1, to);
+            cls = (clo | chi) ? CLASS_MODIFIED : CLASS_UNCHANGED;
+        }
+        nd->klass = (uint8_t)cls;
+        nd->deleted_in = (cls == CLASS_DELETED)
+                         ? ix->snaps[last + 1].date_epoch : -1;
+    }
+    return 0;
+}
+
 rsyncx_index_t *rsyncx_build_index(const source_t *src,
                                    const snapshot_t *snaps, int snap_count,
                                    int from_idx, int to_idx,
                                    void (*progress_cb)(int, int, long, void *),
                                    void *ctx)
 {
-    if (!src || !snaps) return NULL;
-    if (from_idx < 0) from_idx = 0;
-    if (to_idx >= snap_count) to_idx = snap_count - 1;
-    if (from_idx > to_idx) return NULL;
-    int range = to_idx - from_idx + 1;
-    if (range > 128) return NULL;
+    if (!src || !snaps || snap_count <= 0) return NULL;
+    int base = (snap_count > 128) ? snap_count - 128 : 0;
+    int range = snap_count - base;
 
     rsyncx_index_t *ix = calloc(1, sizeof(*ix));
     if (!ix) return NULL;
+    ix->snap_base = base;
     ix->snap_count = range;
     ix->snaps = malloc((size_t)range * sizeof(snapshot_t));
     if (!ix->snaps) { free(ix); return NULL; }
-    for (int i = 0; i < range; i++) ix->snaps[i] = snaps[from_idx + i];
+    for (int i = 0; i < range; i++) ix->snaps[i] = snaps[base + i];
 
     long files_so_far = 0;
     for (int i = 0; i < range; i++) {
@@ -387,9 +444,9 @@ rsyncx_index_t *rsyncx_build_index(const source_t *src,
 
         int rc;
         if (src->type == SOURCE_REMOTE) {
-            rc = scan_tree_remote(src, snaps[from_idx + i].full_path, &a);
+            rc = scan_tree_remote(src, ix->snaps[i].full_path, &a);
         } else {
-            rc = scan_tree_local(snaps[from_idx + i].full_path, &a);
+            rc = scan_tree_local(ix->snaps[i].full_path, &a);
         }
         if (rc != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
         if (merge_snapshot(ix, i, &a) != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
@@ -398,7 +455,9 @@ rsyncx_index_t *rsyncx_build_index(const source_t *src,
         if (progress_cb) progress_cb(i + 1, range, files_so_far, ctx);
     }
 
-    finalize(ix);
+    link_tree(ix);
+    if (rsyncx_index_set_range(ix, from_idx, to_idx) != 0)
+        (void)rsyncx_index_set_range(ix, base, base + range - 1);
     return ix;
 }
 
@@ -449,13 +508,18 @@ int rsyncx_index_children(const rsyncx_index_t *ix, const char *rel_path,
     }
 
     int n = 0;
-    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) n++;
+    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) {
+        if (!ix->nodes[c].in_range) continue;
+        n++;
+    }
     lifecycle_t *arr = (n > 0) ? malloc((size_t)n * sizeof(lifecycle_t)) : NULL;
     if (n > 0 && !arr) return -1;
 
     int i = 0;
-    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling)
+    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) {
+        if (!ix->nodes[c].in_range) continue;
         node_to_lifecycle(ix, c, 0, &arr[i++]);
+    }
 
     *out = arr; *count = n;
     return 0;
@@ -473,14 +537,17 @@ int rsyncx_index_dirs(const rsyncx_index_t *ix, const char *rel_path,
     }
 
     int n = 0;
-    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling)
+    for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) {
+        if (!ix->nodes[c].in_range) continue;
         if (ix->nodes[c].is_dir) n++;
+    }
     dir_entry_t *arr = (n > 0) ? malloc((size_t)n * sizeof(dir_entry_t)) : NULL;
     if (n > 0 && !arr) return -1;
 
-    int i = 0, last = ix->snap_count - 1;
+    int i = 0, last = ix->range_to;
     for (int c = head; c != IDX_NONE; c = ix->nodes[c].next_sibling) {
         const idx_node_t *nd = &ix->nodes[c];
+        if (!nd->in_range) continue;
         if (!nd->is_dir) continue;
         dir_entry_t d; memset(&d, 0, sizeof d);
         str_copy(d.name, sizeof d.name, ix->pool + nd->name_off);
@@ -501,6 +568,7 @@ int rsyncx_index_search(const rsyncx_index_t *ix, const char *query,
     int n = 0;
     for (int i = 0; i < ix->node_count; i++) {
         const idx_node_t *nd = &ix->nodes[i];
+        if (!nd->in_range) continue;
         if (nd->is_dir) continue;
         if (strstr(ix->pool + nd->name_off, query)) n++;
     }
@@ -510,6 +578,7 @@ int rsyncx_index_search(const rsyncx_index_t *ix, const char *query,
     int k = 0;
     for (int i = 0; i < ix->node_count; i++) {
         const idx_node_t *nd = &ix->nodes[i];
+        if (!nd->in_range) continue;
         if (nd->is_dir) continue;
         if (strstr(ix->pool + nd->name_off, query)) node_to_lifecycle(ix, i, 1, &arr[k++]);
     }

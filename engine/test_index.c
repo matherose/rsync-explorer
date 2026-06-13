@@ -246,6 +246,122 @@ static void test_index_children(void)
     printf("PASS: index children + classification\n");
 }
 
+/* 3-snapshot fixture:
+   alpha.txt : s0, s1, s2 hard-linked            → UNCHANGED in any range containing it
+   beta.txt  : s2 only                           → NEW in [0,2]; absent in [0,1]
+   gamma.txt : s0 only                           → DELETED in [0,2] and [0,1]; absent in [1,2]
+   delta.txt : s0 and s2, DIFFERENT inodes       → DEL_NEW in [0,2]; DELETED in [0,1]; NEW in [1,2]
+   mu.txt    : s0; rewritten in s1; s1≡s2 linked → MODIFIED in [0,2] and [0,1]; UNCHANGED in [1,2]
+*/
+static void build_fixture3(char *base_out, size_t base_sz, snapshot_t snaps_out[3])
+{
+    char tmpl[] = "/tmp/rsyncx_idx3_XXXXXX";
+    char *base = mkdtemp(tmpl);
+    assert(base != NULL);
+    str_copy(base_out, base_sz, base);
+
+    char s[3][1100];
+    const char *names[3] = { "2026-01-01_00-00", "2026-01-02_00-00", "2026-01-03_00-00" };
+    for (int i = 0; i < 3; i++) {
+        snprintf(s[i], sizeof s[i], "%s/%s", base, names[i]);
+        assert(mkdir(s[i], 0755) == 0);
+        snaps_out[i] = rsyncx_make_snapshot(names[i], s[i], 1000 + i);
+    }
+
+    char p[1200], q[1200];
+
+    /* alpha: all three, hard-linked */
+    snprintf(p, sizeof p, "%s/alpha.txt", s[0]); write_file(p, "alpha");
+    snprintf(q, sizeof q, "%s/alpha.txt", s[1]); assert(link(p, q) == 0);
+    snprintf(q, sizeof q, "%s/alpha.txt", s[2]); assert(link(p, q) == 0);
+
+    /* beta: s2 only */
+    snprintf(p, sizeof p, "%s/beta.txt", s[2]); write_file(p, "beta");
+
+    /* gamma: s0 only */
+    snprintf(p, sizeof p, "%s/gamma.txt", s[0]); write_file(p, "gamma");
+
+    /* delta: s0 and s2, different inodes */
+    snprintf(p, sizeof p, "%s/delta.txt", s[0]); write_file(p, "delta-v1");
+    snprintf(p, sizeof p, "%s/delta.txt", s[2]); write_file(p, "delta-v2");
+
+    /* mu: s0; new inode in s1; s2 hard-links s1 */
+    snprintf(p, sizeof p, "%s/mu.txt", s[0]); write_file(p, "mu-v1");
+    snprintf(p, sizeof p, "%s/mu.txt", s[1]); write_file(p, "mu-v2");
+    snprintf(q, sizeof q, "%s/mu.txt", s[2]); assert(link(p, q) == 0);
+}
+
+static void expect_class(lifecycle_t *arr, int n, const char *leaf,
+                         file_class_t cls)
+{
+    lifecycle_t *lc = find_lc(arr, n, leaf);
+    assert(lc != NULL);
+    assert(lc->class == cls);
+}
+
+static void test_set_range(void)
+{
+    char base[1100];
+    snapshot_t snaps[3];
+    build_fixture3(base, sizeof base, snaps);
+    source_t src = rsyncx_make_source("t3", 0, base, "", "", "");
+
+    rsyncx_index_t *idx = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+    assert(idx != NULL);
+
+    lifecycle_t *out = NULL; int n = 0;
+
+    /* full range [0,2] */
+    assert(rsyncx_index_children(idx, "", &out, &n) == 0);
+    assert(n == 5);
+    expect_class(out, n, "alpha.txt", CLASS_UNCHANGED);
+    expect_class(out, n, "beta.txt",  CLASS_NEW);
+    expect_class(out, n, "gamma.txt", CLASS_DELETED);
+    expect_class(out, n, "delta.txt", CLASS_DEL_NEW);
+    expect_class(out, n, "mu.txt",    CLASS_MODIFIED);
+    /* gamma deleted_in = epoch of s1 */
+    assert(find_lc(out, n, "gamma.txt")->deleted_in == 1001);
+    rsyncx_free(out);
+
+    /* sub-range [0,1] */
+    assert(rsyncx_index_set_range(idx, 0, 1) == 0);
+    assert(rsyncx_index_children(idx, "", &out, &n) == 0);
+    assert(n == 4);   /* beta (s2-only) is filtered out */
+    assert(find_lc(out, n, "beta.txt") == NULL);
+    expect_class(out, n, "alpha.txt", CLASS_UNCHANGED);
+    expect_class(out, n, "gamma.txt", CLASS_DELETED);
+    expect_class(out, n, "delta.txt", CLASS_DELETED);
+    expect_class(out, n, "mu.txt",    CLASS_MODIFIED);
+    rsyncx_free(out);
+
+    /* sub-range [1,2] */
+    assert(rsyncx_index_set_range(idx, 1, 2) == 0);
+    assert(rsyncx_index_children(idx, "", &out, &n) == 0);
+    assert(n == 4);   /* gamma (s0-only) is filtered out */
+    assert(find_lc(out, n, "gamma.txt") == NULL);
+    expect_class(out, n, "alpha.txt", CLASS_UNCHANGED);
+    expect_class(out, n, "beta.txt",  CLASS_NEW);
+    expect_class(out, n, "delta.txt", CLASS_NEW);
+    expect_class(out, n, "mu.txt",    CLASS_UNCHANGED);
+    rsyncx_free(out);
+
+    /* search respects the range */
+    assert(rsyncx_index_set_range(idx, 1, 2) == 0);
+    assert(rsyncx_index_search(idx, "gamma", &out, &n) == 0);
+    assert(n == 0);
+    rsyncx_free(out);
+
+    /* back to full range restores everything */
+    assert(rsyncx_index_set_range(idx, 0, 2) == 0);
+    assert(rsyncx_index_children(idx, "", &out, &n) == 0);
+    assert(n == 5);
+    rsyncx_free(out);
+
+    rsyncx_index_free(idx);
+    char rm[1200]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", base); (void)system(rm);
+    printf("PASS: set_range reclassification\n");
+}
+
 static void test_index_dirs_and_search(void)
 {
     char base[1024], s1[1024], s2[1024];
@@ -291,6 +407,7 @@ int main(void)
     test_scan_tree_local();
     test_index_children();
     test_index_dirs_and_search();
+    test_set_range();
     test_cache_roundtrip();
     test_cache_robustness();
     return 0;
