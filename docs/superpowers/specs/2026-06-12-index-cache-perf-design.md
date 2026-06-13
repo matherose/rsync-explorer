@@ -43,8 +43,6 @@ newest snapshot; timeline drag = an in-memory pass, milliseconds.
 ## 4. Non-Goals
 
 - Replacing `find` on the remote (fd, custom scanner binaries).
-- Caching for local sources (fts scans are already disk-speed; cache applies
-  to remote sources only).
 - New UI beyond the existing indexing progress display.
 - Watching the NAS for new snapshots (discovery still happens at launch /
   source switch).
@@ -62,9 +60,13 @@ app/MainWindowController.swift  timeline handlers call setRange, not rebuild
 ### 5.1 Per-snapshot scan cache (`engine/cache.c`)
 
 - **Path:** `~/Library/Caches/rsync-explorer/<source-id>/<snapshot-name>.scan`
-  - `<source-id>`: sanitized `host_basepath` (non-alphanumerics → `_`);
-    local sources do not use the cache.
+  - `<source-id>`: sanitized `host_basepath` (`local_basepath` for local
+    sources — caching applies to both source types; it primarily benefits
+    remote but costs nothing locally and makes the cache path testable
+    without SSH).
   - `<snapshot-name>`: the snapshot directory's basename.
+  - The cache root is overridable via the `RSYNCX_CACHE_DIR` environment
+    variable (used by tests for hermeticity).
 - **Format:** zlib-compressed (`dependency('zlib')` in Meson) stream of:
   - header: magic `RXSC` (4 bytes), format version (u32), entry count (u64);
   - one record per entry: fixed numeric fields of `file_entry_t`
@@ -88,21 +90,38 @@ app/MainWindowController.swift  timeline handlers call setRange, not rebuild
 
 ### 5.2 Index over all snapshots + range filter (`engine/index.c`)
 
-- `rsyncx_build_index` drops its `from_idx`/`to_idx` build semantics and
-  always indexes the full discovered snapshot list. If the list exceeds the
-  128-snapshot presence-bitmap cap, the **newest 128** are indexed
-  (documented limit; presence bitmap stays `present_lo/present_hi`).
+- `rsyncx_build_index` keeps its signature, but `from_idx`/`to_idx` change
+  meaning: the build always indexes the full discovered snapshot list and
+  applies `[from_idx, to_idx]` as the **initial range filter** (so existing
+  callers keep working at every migration step). If the list exceeds the
+  128-snapshot presence-bitmap cap, the **newest 128** are indexed; the
+  index stores a `snap_base` offset and all public range indices remain in
+  the caller's full-array space.
 - New API: `rsyncx_index_set_range(rsyncx_index_t *ix, int from, int to)` —
-  re-runs only the finalize pass: for each node, `klass`, `deleted_in`,
-  `first_backup`/`last_backup` are recomputed from the presence bitmap
-  restricted to `[from, to]`. Nodes with no presence in the range are marked
-  absent; `rsyncx_index_children` / `_dirs` / `_search` skip absent nodes.
-- `rsyncx_build_index` ends with `set_range(0, count-1)` so the index is
-  immediately queryable.
+  re-runs only the classification pass (tree linking happens once at build):
+  for each node, `klass`, `deleted_in`, `first_backup`/`last_backup` are
+  recomputed from the presence bitmap restricted to `[from, to]` using
+  128-bit mask operations. Nodes with no presence in the range are marked
+  absent (`in_range = 0`); `rsyncx_index_children` / `_dirs` / `_search`
+  skip absent nodes, and `_dirs` computes `exists_in_latest` against the
+  range end.
+- **Per-range MODIFIED needs a second bitmap.** The current single
+  `modified` flag is global; a sub-range cannot tell *when* the inode
+  changed. Each node gains `changed_lo/changed_hi`: bit `s` is set during
+  merge when the inode at snapshot `s` differs from the inode at the
+  previous present snapshot. A node is MODIFIED in `[a, b]` iff any changed
+  bit is set strictly after its first present snapshot within the range.
+- **Metadata caveat (deliberate):** `mode/size/mtime/user/group/nlink` shown
+  for a node come from the newest *indexed* snapshot where it exists — not
+  the newest in-range one. Storing per-snapshot metadata at 50×500k scale is
+  not viable. Classifications, `first/last_backup`, `deleted_in`, and
+  `last_real_path` are all computed range-correctly.
 
 ### 5.3 Parallel cold scan (`engine/index.c`)
 
-- Worker pool of `min(6, snapshots_to_scan)` pthreads. Workers pull snapshot
+- Worker pool of `min(6, snapshots_to_scan)` pthreads (count overridable via
+  `RSYNCX_INDEX_WORKERS`, clamped to [1, 16] — used by tests to compare
+  serial vs parallel builds). Workers pull snapshot
   indices from a shared atomic counter; each does cache-read, falling back to
   `scan_tree_remote` (then `cache_write` if cacheable), into a private
   `file_entry_array_t`.
@@ -153,9 +172,11 @@ run via `meson test`):
    compares equal field-by-field.
 2. **Cache robustness:** truncated file, bad magic, wrong version, unsafe
    rel_path inside a record → `cache_read` misses; build still succeeds.
-3. **Range equivalence:** index 3 synthetic snapshots; for every sub-range
-   `[a,b]`, `set_range(a,b)` classifications equal a from-scratch build over
-   only those snapshots.
+3. **Range equivalence:** index synthetic snapshots covering all five
+   classes; for each sub-range `[a,b]`, `set_range(a,b)` yields the
+   hand-computed expected classification, dates, and visibility for every
+   file (fixtures use hard links so metadata is stable and the metadata
+   caveat does not affect comparisons).
 4. **Parallel determinism:** parallel build result identical to serial
    (force worker count 1 vs 6 over the same trees).
 5. **Housekeeping:** stale `.scan` files for removed snapshots are deleted;
