@@ -229,6 +229,11 @@ class EngineBridge {
         rsyncx_index_free(idx)
     }
 
+    @discardableResult
+    static func setRange(_ idx: OpaquePointer, fromIdx: Int, toIdx: Int) -> Bool {
+        return rsyncx_index_set_range(idx, Int32(fromIdx), Int32(toIdx)) == 0
+    }
+
     static func indexChildren(_ idx: OpaquePointer, relPath: String) -> [FileEntry] {
         var out: UnsafeMutablePointer<lifecycle_t>?
         var count: Int32 = 0

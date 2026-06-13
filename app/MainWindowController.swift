@@ -345,10 +345,18 @@ class MainWindowController: NSWindowController,
                     return
                 }
                 self.index = idx
-                self.scanCurrentDir()
-                self.expandCurrentTree()
+                self.applyRange()
             }
         }
+    }
+
+    /// Apply the current fromIdx/toIdx to the live index — an in-memory
+    /// reclassification, no rescan. Safe on the main thread (bitmap pass).
+    private func applyRange() {
+        guard let idx = index else { return }
+        EngineBridge.setRange(idx, fromIdx: fromIdx, toIdx: toIdx)
+        scanCurrentDir()
+        expandCurrentTree()
     }
 
     // MARK: - Directory scanning
@@ -396,7 +404,7 @@ class MainWindowController: NSWindowController,
     func timelineRangeChanged(from: Int, to: Int) {
         fromIdx = from
         toIdx = to
-        rebuildIndex()
+        applyRange()
     }
 
     @objc func toggleTimeline(_ sender: Any?) {
@@ -408,7 +416,7 @@ class MainWindowController: NSWindowController,
             toIdx = max(0, snapshots.count - 1)
             timelineView.fromIdx = fromIdx
             timelineView.toIdx = toIdx
-            rebuildIndex()
+            applyRange()
         }
     }
 
