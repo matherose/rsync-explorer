@@ -52,6 +52,7 @@ void str_copy(char *dst, size_t dst_size, const char *src);
 void str_trim(char *s);
 void mode_to_str(uint32_t mode, char *out, size_t out_size);
 int  epoch_to_str(int64_t epoch, char *out, size_t out_size);
+int  rel_path_safe(const char *p);
 
 /* ── Scan implementations ── */
 
@@ -69,6 +70,23 @@ int  scan_dir_remote_parallel(const source_t *src,
 /* Recursively list every entry (files AND directories) under a local snapshot
    directory, with rel_path = path relative to snapshot_root. Returns 0/-1. */
 int scan_tree_local(const char *snapshot_root, file_entry_array_t *out);
+
+/* ── Per-snapshot scan cache (cache.c) ── */
+
+/* Load a cached snapshot listing. Initializes *out itself. Returns 0 on a
+   cache hit; -1 on any miss (absent, bad magic/version, truncation, zlib
+   error, invalid record) with *out left empty-initialized. */
+int  cache_read(const source_t *src, const snapshot_t *snap,
+                file_entry_array_t *out);
+
+/* Persist a snapshot listing atomically (tmp + rename). Returns 0/-1;
+   failure is non-fatal for callers. */
+int  cache_write(const source_t *src, const snapshot_t *snap,
+                 const file_entry_array_t *a);
+
+/* Delete cache files in this source's cache dir that don't belong to any
+   snapshot in snaps[0..count-1] (stale .scan files, leftover .tmp files). */
+void cache_housekeep(const source_t *src, const snapshot_t *snaps, int count);
 
 /* ── Classify (classify.c) ── */
 

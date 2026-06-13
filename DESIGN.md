@@ -687,6 +687,7 @@ rsync-explorer/
 │   ├── tree.c               ← sidebar tree expansion
 │   ├── ssh.c                ← SSH command builder
 │   ├── util.c               ← string pool, bitmap, epoch→date helpers
+│   ├── cache.c              ← per-snapshot zlib scan cache (atomic write)
 │   ├── index.c              ← in-memory backup index (hash map + search)
 │   ├── module.modulemap     ← exposes engine.h to Swift as `import engine`
 │   ├── test_*.c             ← engine test programs (run via meson test)

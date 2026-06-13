@@ -94,6 +94,119 @@ static lifecycle_t *find_lc(lifecycle_t *a, int n, const char *leaf)
     return NULL;
 }
 
+/* ── Cache tests ── */
+
+static source_t local_source(const char *dest)
+{
+    return rsyncx_make_source("test", 0 /* SOURCE_LOCAL */, dest, "", "", "");
+}
+
+static void test_cache_roundtrip(void)
+{
+    char tmpl[] = "/tmp/rsyncx_cache_XXXXXX";
+    char *cache_dir = mkdtemp(tmpl);
+    assert(cache_dir != NULL);
+    setenv("RSYNCX_CACHE_DIR", cache_dir, 1);
+
+    source_t src = local_source("/tmp/some_dest");
+    snapshot_t snap = rsyncx_make_snapshot("2026-01-01_00-00", "/tmp/x", 1000);
+
+    file_entry_array_t in;
+    fe_array_init(&in);
+    file_entry_t fe;
+    memset(&fe, 0, sizeof fe);
+    str_copy(fe.rel_path, sizeof fe.rel_path, "docs/readme.md");
+    str_copy(fe.user, sizeof fe.user, "joel");
+    str_copy(fe.group, sizeof fe.group, "staff");
+    fe.inode = 42; fe.size = 1234; fe.mtime = 1700000000;
+    fe.mode = 0100644; fe.nlink = 3; fe.is_dir = 0;
+    assert(fe_array_push(&in, &fe) == 0);
+    str_copy(fe.rel_path, sizeof fe.rel_path, "docs");
+    fe.is_dir = 1; fe.size = 0;
+    assert(fe_array_push(&in, &fe) == 0);
+
+    assert(cache_write(&src, &snap, &in) == 0);
+
+    file_entry_array_t out;
+    assert(cache_read(&src, &snap, &out) == 0);
+    assert(out.count == 2);
+    assert(strcmp(out.data[0].rel_path, "docs/readme.md") == 0);
+    assert(strcmp(out.data[0].user, "joel") == 0);
+    assert(strcmp(out.data[0].group, "staff") == 0);
+    assert(out.data[0].inode == 42 && out.data[0].size == 1234);
+    assert(out.data[0].mtime == 1700000000 && out.data[0].mode == 0100644);
+    assert(out.data[0].nlink == 3 && out.data[0].is_dir == 0);
+    assert(out.data[1].is_dir == 1);
+
+    fe_array_free(&in);
+    fe_array_free(&out);
+    printf("PASS: cache round-trip\n");
+}
+
+static void test_cache_robustness(void)
+{
+    char tmpl[] = "/tmp/rsyncx_cache_XXXXXX";
+    char *cache_dir = mkdtemp(tmpl);
+    assert(cache_dir != NULL);
+    setenv("RSYNCX_CACHE_DIR", cache_dir, 1);
+
+    source_t src = local_source("/tmp/other_dest");
+    snapshot_t snap = rsyncx_make_snapshot("2026-01-02_00-00", "/tmp/x", 2000);
+    file_entry_array_t out;
+
+    /* absent file → miss */
+    assert(cache_read(&src, &snap, &out) == -1);
+    fe_array_free(&out);
+
+    /* write a valid entry, then corrupt it in various ways */
+    file_entry_array_t in;
+    fe_array_init(&in);
+    file_entry_t fe;
+    memset(&fe, 0, sizeof fe);
+    str_copy(fe.rel_path, sizeof fe.rel_path, "a.txt");
+    assert(fe_array_push(&in, &fe) == 0);
+    assert(cache_write(&src, &snap, &in) == 0);
+    fe_array_free(&in);
+
+    char path[1200];
+    /* locate the .scan file (single file in the source subdir) */
+    {
+        char dir1[1100];
+        snprintf(dir1, sizeof dir1, "%s", cache_dir);
+        DIR *d1 = opendir(dir1);
+        assert(d1);
+        struct dirent *e1;
+        char sub[1100] = "";
+        while ((e1 = readdir(d1)) != NULL)
+            if (e1->d_name[0] != '.') snprintf(sub, sizeof sub, "%s/%s", dir1, e1->d_name);
+        closedir(d1);
+        assert(sub[0]);
+        snprintf(path, sizeof path, "%s/%s.scan", sub, "2026-01-02_00-00");
+    }
+
+    /* sanity: valid file is a hit */
+    assert(cache_read(&src, &snap, &out) == 0);
+    assert(out.count == 1);
+    fe_array_free(&out);
+
+    /* truncated → miss */
+    truncate(path, 8);
+    assert(cache_read(&src, &snap, &out) == -1);
+    fe_array_free(&out);
+
+    /* bad magic → miss */
+    {
+        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        assert(fd >= 0);
+        assert(write(fd, "NOPE", 4) == 4);
+        close(fd);
+    }
+    assert(cache_read(&src, &snap, &out) == -1);
+    fe_array_free(&out);
+
+    printf("PASS: cache robustness\n");
+}
+
 static void test_index_children(void)
 {
     char base[1024], s1[1024], s2[1024];
@@ -171,8 +284,14 @@ static void test_index_dirs_and_search(void)
 
 int main(void)
 {
+    char cache_tmpl[] = "/tmp/rsyncx_cache_main_XXXXXX";
+    assert(mkdtemp(cache_tmpl) != NULL);
+    setenv("RSYNCX_CACHE_DIR", cache_tmpl, 1);
+
     test_scan_tree_local();
     test_index_children();
     test_index_dirs_and_search();
+    test_cache_roundtrip();
+    test_cache_robustness();
     return 0;
 }

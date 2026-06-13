@@ -56,25 +56,6 @@ int scan_tree_local(const char *snapshot_root, file_entry_array_t *out)
     return 0;
 }
 
-/* Reject rel_paths that are empty (the snapshot root), absolute, contain a
-   ".." path component, or contain control bytes — these are unsafe to build a
-   real on-disk path from, or are the root entry the local scan also excludes. */
-static int rel_path_safe(const char *p)
-{
-    if (p[0] == '\0') return 0;       /* empty %P = the snapshot root itself */
-    if (p[0] == '/')  return 0;       /* must be relative to the snapshot root */
-    for (const char *c = p; *c; c++)
-        if ((unsigned char)*c < 0x20) return 0;   /* control bytes (incl stray newline frags) */
-    const char *s = p;
-    while (s) {
-        const char *slash = strchr(s, '/');
-        size_t seg = slash ? (size_t)(slash - s) : strlen(s);
-        if (seg == 2 && s[0] == '.' && s[1] == '.') return 0;  /* ".." component */
-        s = slash ? slash + 1 : NULL;
-    }
-    return 1;
-}
-
 /* Parse one `find -printf "%i\t%m\t%u\t%g\t%s\t%T@\t%n\t%y\t%P"` line into fe.
    %m is octal (find prints mode in octal), so st_mode is parsed base 8. */
 static int parse_index_find_line(const char *line, file_entry_t *fe)
