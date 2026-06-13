@@ -398,6 +398,110 @@ static void test_index_dirs_and_search(void)
     printf("PASS: index dirs + search\n");
 }
 
+/* Compare two children listings field-by-field (order-independent). */
+static void assert_same_children(rsyncx_index_t *a, rsyncx_index_t *b)
+{
+    lifecycle_t *oa = NULL, *ob = NULL; int na = 0, nb = 0;
+    assert(rsyncx_index_children(a, "", &oa, &na) == 0);
+    assert(rsyncx_index_children(b, "", &ob, &nb) == 0);
+    assert(na == nb);
+    for (int i = 0; i < na; i++) {
+        lifecycle_t *m = find_lc(ob, nb, oa[i].rel_path);
+        assert(m != NULL);
+        assert(m->class == oa[i].class);
+        assert(m->deleted_in == oa[i].deleted_in);
+        assert(m->first_backup == oa[i].first_backup);
+        assert(m->last_backup == oa[i].last_backup);
+    }
+    rsyncx_free(oa);
+    rsyncx_free(ob);
+}
+
+static void test_parallel_matches_serial(void)
+{
+    char base[1100];
+    snapshot_t snaps[3];
+    build_fixture3(base, sizeof base, snaps);
+    source_t src = rsyncx_make_source("tp", 0, base, "", "", "");
+
+    setenv("RSYNCX_INDEX_WORKERS", "1", 1);
+    rsyncx_index_t *serial = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+    assert(serial != NULL);
+
+    setenv("RSYNCX_INDEX_WORKERS", "6", 1);
+    rsyncx_index_t *parallel = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+    assert(parallel != NULL);
+    unsetenv("RSYNCX_INDEX_WORKERS");
+
+    assert_same_children(serial, parallel);
+    rsyncx_index_free(serial);
+    rsyncx_index_free(parallel);
+    char rm[1200]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", base); (void)system(rm);
+    printf("PASS: parallel build matches serial\n");
+}
+
+static void test_cache_serves_old_snapshots(void)
+{
+    char base[1100];
+    snapshot_t snaps[3];
+    build_fixture3(base, sizeof base, snaps);
+    source_t src = rsyncx_make_source("tc", 0, base, "", "", "");
+
+    char tmpl[] = "/tmp/rsyncx_cache_XXXXXX";
+    char *cache_dir = mkdtemp(tmpl);
+    assert(cache_dir != NULL);
+    setenv("RSYNCX_CACHE_DIR", cache_dir, 1);
+
+    rsyncx_index_t *first = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+    assert(first != NULL);
+
+    char victim[1200];
+    snprintf(victim, sizeof victim, "%s/gamma.txt", snaps[0].full_path);
+    assert(unlink(victim) == 0);
+
+    rsyncx_index_t *second = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+    assert(second != NULL);
+    assert_same_children(first, second);
+
+    lifecycle_t *out = NULL; int n = 0;
+    assert(rsyncx_index_children(second, "", &out, &n) == 0);
+    assert(find_lc(out, n, "gamma.txt") != NULL);
+    rsyncx_free(out);
+
+    {
+        DIR *d = opendir(cache_dir);
+        assert(d);
+        struct dirent *e;
+        char sub[1100] = "";
+        while ((e = readdir(d)) != NULL)
+            if (e->d_name[0] != '.') snprintf(sub, sizeof sub, "%s/%s", cache_dir, e->d_name);
+        closedir(d);
+        assert(sub[0]);
+        char f[1300];
+        struct stat st;
+        snprintf(f, sizeof f, "%s/%s.scan", sub, snaps[0].name);
+        assert(stat(f, &st) == 0);
+        snprintf(f, sizeof f, "%s/%s.scan", sub, snaps[1].name);
+        assert(stat(f, &st) == 0);
+        snprintf(f, sizeof f, "%s/%s.scan", sub, snaps[2].name);
+        assert(stat(f, &st) != 0);
+
+        snprintf(f, sizeof f, "%s/2020-01-01_00-00.scan", sub);
+        write_file(f, "stale");
+        rsyncx_index_t *third = rsyncx_build_index(&src, snaps, 3, 0, 2, NULL, NULL);
+        assert(third != NULL);
+        assert(stat(f, &st) != 0);
+        snprintf(f, sizeof f, "%s/%s.scan", sub, snaps[0].name);
+        assert(stat(f, &st) == 0);
+        rsyncx_index_free(third);
+    }
+
+    rsyncx_index_free(first);
+    rsyncx_index_free(second);
+    char rm[1200]; snprintf(rm, sizeof rm, "rm -rf \"%s\"", base); (void)system(rm);
+    printf("PASS: cache serves old snapshots + housekeeping\n");
+}
+
 int main(void)
 {
     char cache_tmpl[] = "/tmp/rsyncx_cache_main_XXXXXX";
@@ -410,5 +514,7 @@ int main(void)
     test_set_range();
     test_cache_roundtrip();
     test_cache_robustness();
+    test_parallel_matches_serial();
+    test_cache_serves_old_snapshots();
     return 0;
 }

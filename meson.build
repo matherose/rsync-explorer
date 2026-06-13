@@ -8,6 +8,11 @@ project('rsync-explorer', 'c', 'swift',
   ],
 )
 
+# libengine.a references zlib (cache.c) and pthread (index.c). Meson's swift
+# backend does not forward dependency link flags from executable() to swiftc,
+# so the swift app would fail to link without these project-wide flags.
+add_project_link_arguments('-lz', '-lpthread', language: 'swift')
+
 subdir('engine')
 subdir('app')
 

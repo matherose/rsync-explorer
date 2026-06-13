@@ -5,6 +5,7 @@
 #include "engine_internal.h"
 #include <errno.h>
 #include <fts.h>
+#include <pthread.h>
 #include <sys/wait.h>
 
 /* ── Whole-tree local scan (files AND directories, full rel_paths) ── */
@@ -419,6 +420,67 @@ int rsyncx_index_set_range(rsyncx_index_t *ix, int from_idx, int to_idx)
     return 0;
 }
 
+/* ── Parallel snapshot scanning ── */
+
+typedef struct {
+    const source_t   *src;
+    const snapshot_t *snaps;
+    int  range;
+    int  next;
+    int  stop;
+    file_entry_array_t *results;
+    uint8_t *done;
+    pthread_mutex_t mu;
+    pthread_cond_t  cv;
+} scan_pool_t;
+
+static int scan_worker_count(int range)
+{
+    const char *env = getenv("RSYNCX_INDEX_WORKERS");
+    int n = (env && env[0]) ? atoi(env) : 6;
+    if (n < 1)  n = 1;
+    if (n > 16) n = 16;
+    return n < range ? n : range;
+}
+
+static void *scan_worker(void *arg)
+{
+    scan_pool_t *p = arg;
+    for (;;) {
+        pthread_mutex_lock(&p->mu);
+        if (p->stop || p->next >= p->range) { pthread_mutex_unlock(&p->mu); return NULL; }
+        int i = p->next++;
+        pthread_mutex_unlock(&p->mu);
+
+        int cacheable = (i < p->range - 1);
+
+        file_entry_array_t a;
+        int rc;
+        if (cacheable && cache_read(p->src, &p->snaps[i], &a) == 0) {
+            rc = 0;
+        } else {
+            if (!cacheable) fe_array_init(&a);
+            rc = (p->src->type == SOURCE_REMOTE)
+                   ? scan_tree_remote(p->src, p->snaps[i].full_path, &a)
+                   : scan_tree_local(p->snaps[i].full_path, &a);
+            if (rc == 0 && cacheable)
+                (void)cache_write(p->src, &p->snaps[i], &a);
+        }
+
+        pthread_mutex_lock(&p->mu);
+        if (rc != 0) {
+            p->stop = 1;
+            fe_array_free(&a);
+        } else {
+            p->results[i] = a;
+            p->done[i] = 1;
+        }
+        pthread_cond_broadcast(&p->cv);
+        pthread_mutex_unlock(&p->mu);
+        if (rc != 0) return NULL;
+    }
+}
+
 rsyncx_index_t *rsyncx_build_index(const source_t *src,
                                    const snapshot_t *snaps, int snap_count,
                                    int from_idx, int to_idx,
@@ -437,23 +499,60 @@ rsyncx_index_t *rsyncx_build_index(const source_t *src,
     if (!ix->snaps) { free(ix); return NULL; }
     for (int i = 0; i < range; i++) ix->snaps[i] = snaps[base + i];
 
-    long files_so_far = 0;
-    for (int i = 0; i < range; i++) {
-        file_entry_array_t a;
-        fe_array_init(&a);
-
-        int rc;
-        if (src->type == SOURCE_REMOTE) {
-            rc = scan_tree_remote(src, ix->snaps[i].full_path, &a);
-        } else {
-            rc = scan_tree_local(ix->snaps[i].full_path, &a);
-        }
-        if (rc != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
-        if (merge_snapshot(ix, i, &a) != 0) { fe_array_free(&a); rsyncx_index_free(ix); return NULL; }
-        files_so_far += a.count;
-        fe_array_free(&a);
-        if (progress_cb) progress_cb(i + 1, range, files_so_far, ctx);
+    scan_pool_t pool;
+    memset(&pool, 0, sizeof pool);
+    pool.src = src;
+    pool.snaps = ix->snaps;
+    pool.range = range;
+    pool.results = calloc((size_t)range, sizeof(file_entry_array_t));
+    pool.done    = calloc((size_t)range, 1);
+    if (!pool.results || !pool.done) {
+        free(pool.results); free(pool.done);
+        rsyncx_index_free(ix); return NULL;
     }
+    pthread_mutex_init(&pool.mu, NULL);
+    pthread_cond_init(&pool.cv, NULL);
+
+    int workers = scan_worker_count(range);
+    pthread_t tid[16];
+    int started = 0;
+    for (int w = 0; w < workers; w++)
+        if (pthread_create(&tid[w], NULL, scan_worker, &pool) == 0) started++;
+        else break;
+
+    long files_so_far = 0;
+    int failed = (started == 0);
+    for (int i = 0; i < range && !failed; i++) {
+        pthread_mutex_lock(&pool.mu);
+        while (!pool.done[i] && !pool.stop)
+            pthread_cond_wait(&pool.cv, &pool.mu);
+        int ready = pool.done[i];
+        pthread_mutex_unlock(&pool.mu);
+        if (!ready) { failed = 1; break; }
+
+        if (merge_snapshot(ix, i, &pool.results[i]) != 0) {
+            pthread_mutex_lock(&pool.mu);
+            pool.stop = 1;
+            pthread_cond_broadcast(&pool.cv);
+            pthread_mutex_unlock(&pool.mu);
+            failed = 1;
+        }
+        files_so_far += pool.results[i].count;
+        fe_array_free(&pool.results[i]);
+        pool.done[i] = 2;
+        if (!failed && progress_cb) progress_cb(i + 1, range, files_so_far, ctx);
+    }
+
+    for (int w = 0; w < started; w++) pthread_join(tid[w], NULL);
+    for (int i = 0; i < range; i++)
+        if (pool.done[i] == 1) fe_array_free(&pool.results[i]);
+    free(pool.results);
+    free(pool.done);
+    pthread_mutex_destroy(&pool.mu);
+    pthread_cond_destroy(&pool.cv);
+    if (failed) { rsyncx_index_free(ix); return NULL; }
+
+    cache_housekeep(src, ix->snaps, range);
 
     link_tree(ix);
     if (rsyncx_index_set_range(ix, from_idx, to_idx) != 0)
