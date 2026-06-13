@@ -10,8 +10,14 @@ project('rsync-explorer', 'c', 'swift',
 
 # libengine.a references zlib (cache.c) and pthread (index.c). Meson's swift
 # backend does not forward dependency link flags from executable() to swiftc,
-# so the swift app would fail to link without these project-wide flags.
-add_project_link_arguments('-lz', '-lpthread', language: 'swift')
+# so we add them at the project level. We link the SDK's libz.tbd by absolute
+# path (install_name /usr/lib/libz.1.dylib) instead of -lz, because the
+# engine's pkg-config zlib cascades -L/opt/local/lib onto the swift link line
+# and MacPorts' libz has an @rpath install_name that breaks at app launch.
+swift_sdk = run_command('xcrun', '--sdk', 'macosx', '--show-sdk-path',
+                        check: true).stdout().strip()
+add_project_link_arguments(swift_sdk + '/usr/lib/libz.tbd', '-lpthread',
+                           language: 'swift')
 
 subdir('engine')
 subdir('app')
