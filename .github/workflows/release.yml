@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-14
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tag names are pushed by repo collaborators; git allows shell metachars
+      # (`"`, `;`, `` ` ``, etc.) in tag names. Reject anything that isn't a
+      # plain semver-ish tag before the value reaches any `run:` shell.
+      - name: Validate tag name
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+(\.[0-9]+){0,2}(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match expected vN[.N[.N]][-suffix] format"
+            exit 1
+          fi
+
+      - name: Install Meson + Ninja
+        run: brew install meson ninja
+
+      - name: Configure (release + LTO)
+        run: meson setup build --buildtype=release -Db_lto=true
+
+      - name: Compile
+        run: meson compile -C build
+
+      - name: Test
+        run: meson test -C build --print-errorlogs
+
+      - name: Package .app as .zip
+        run: |
+          cd build
+          # ditto preserves macOS-specific bundle metadata that plain `zip` can drop.
+          ditto -c -k --keepParent rsync-explorer.app \
+            "rsync-explorer-${GITHUB_REF_NAME}-macos-arm64.zip"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "build/rsync-explorer-${GITHUB_REF_NAME}-macos-arm64.zip" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
