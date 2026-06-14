@@ -22,12 +22,24 @@ add_project_link_arguments(swift_sdk + '/usr/lib/libz.tbd', '-lpthread',
 subdir('engine')
 subdir('app')
 
+# config.ini is gitignored (NAS credentials), so release/CI builds have none
+# in the tree. Pass it to the bundle script only when it exists. The Swift
+# app's loadConfig falls back to next-to-executable or CWD if the bundle
+# doesn't contain one, so distributed binaries work without it.
+fs = import('fs')
+bundle_inputs = [rsync_explorer_exe, files('Info.plist')]
+bundle_cmd = [
+  files('scripts/make_bundle.sh'),
+  '@INPUT0@', '@INPUT1@', '@OUTPUT@',
+]
+if fs.exists('config.ini')
+  bundle_inputs += files('config.ini')
+  bundle_cmd += '@INPUT2@'
+endif
+
 custom_target('app-bundle',
-  input: [rsync_explorer_exe, files('Info.plist'), files('config.ini')],
+  input: bundle_inputs,
   output: 'rsync-explorer.app',
-  command: [
-    files('scripts/make_bundle.sh'),
-    '@INPUT0@', '@INPUT1@', '@INPUT2@', '@OUTPUT@',
-  ],
+  command: bundle_cmd,
   build_by_default: true,
 )
