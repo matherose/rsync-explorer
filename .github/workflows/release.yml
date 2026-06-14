@@ -13,7 +13,7 @@ jobs:
     env:
       CC: clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Tag names are pushed by repo collaborators; git allows shell metachars
       # (`"`, `;`, `` ` ``, etc.) in tag names. Reject anything that isn't a

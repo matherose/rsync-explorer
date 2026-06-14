@@ -17,7 +17,7 @@ jobs:
     env:
       CC: clang
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Meson + Ninja
         run: brew install meson ninja
