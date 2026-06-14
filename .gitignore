@@ -1,16 +1,37 @@
+# ── OS ────────────────────────────────────────
 *.DS_Store
-*.ini
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+Thumbs.db
+desktop.ini
 
-# Visual brainstorming companion
+# ── Editors / IDEs / LSP ──────────────────────
+.vscode/
+.idea/
+.cache/
+*.swp
+*.swo
+*~
+
+# ── AI tooling ────────────────────────────────
+.claude/
+.aider*
+.cursor/
+.codeium/
+.continue/
+.windsurf/
+.gemini/
 .superpowers/
 
-# Meson/Ninja out-of-tree build
+# ── Build artifacts ───────────────────────────
 build/
-
-# Stray compiler outputs (should never exist in-tree anymore)
 *.o
 *.a
 *.dSYM/
+
+# Stray compiler outputs (should never exist in-tree anymore)
 engine/test_search
 engine/test_ssh
 engine/test_index
@@ -18,3 +39,6 @@ engine/test_engine
 engine/test_engine_full
 /rsync-explorer
 /rsync-explorer.app/
+
+# ── Project privacy (NAS/SSH credentials) ─────
+*.ini
