@@ -23,7 +23,53 @@ your-nas:/backup/
 
 ## Building
 
-cmake -B build && cmake --build build
+macOS only — the UI is Swift/AppKit. Tested on macOS 14+.
+
+### Prerequisites
+
+- Xcode Command Line Tools (`xcode-select --install`)
+- [Meson](https://mesonbuild.com/) and [Ninja](https://ninja-build.org/)
+
+```sh
+brew install meson ninja        # Homebrew
+# or
+sudo port install meson ninja   # MacPorts
+```
+
+### Compile
+
+```sh
+meson setup build
+meson compile -C build
+```
+
+This builds the C engine (`engine/libengine.a`), the Swift app, and assembles
+the macOS bundle in one shot. The `.app` bundle is the default target — no
+extra step required.
+
+Output: `build/rsync-explorer.app`
+
+### Run
+
+```sh
+open build/rsync-explorer.app
+```
+
+To see engine stderr (useful when debugging), launch the executable directly
+from a terminal instead:
+
+```sh
+build/rsync-explorer.app/Contents/MacOS/rsync-explorer
+```
+
+### Tests
+
+```sh
+meson test -C build
+```
+
+Runs the C engine test suite (`search`, `ssh`, `index`).
+
 
 ## Configuration
 
