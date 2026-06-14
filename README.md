@@ -21,6 +21,28 @@ your-nas:/backup/
 └── latest -> 2026-05-30_00-44/
 ```
 
+## Download
+
+Pre-built macOS app bundles are published on the [Releases page](../../releases).
+They're built with LTO from the tagged commit by GitHub Actions on a clean
+`macos-14` runner. **Apple Silicon only** (arm64); Intel users build from source.
+
+The bundle is **not code-signed** (no paid Developer ID). After downloading,
+clear the Gatekeeper quarantine flag once:
+
+```sh
+xattr -dr com.apple.quarantine ~/Downloads/rsync-explorer.app
+```
+
+Then drop your `config.ini` (see [Configuration](#configuration)) into the
+bundle:
+
+```
+rsync-explorer.app/Contents/Resources/config.ini
+```
+
+(Right-click the `.app` → *Show Package Contents* to navigate there in Finder.)
+
 ## Building
 
 macOS only — the UI is Swift/AppKit. Tested on macOS 14+.
