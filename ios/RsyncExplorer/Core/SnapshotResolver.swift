@@ -46,13 +46,10 @@ enum SnapshotResolver {
         return Context(latestRoot: latestRoot, previousRoot: previousRoot)
     }
 
-    /// All snapshot roots, newest -> oldest, for the merged "everything ever" view.
-    /// Falls back to the `latest` symlink, then the path itself, if no dated dirs.
-    static func snapshotRoots(remotePath: String, entries: [RemoteEntry]) -> [String] {
-        let base = remotePath.hasSuffix("/") ? String(remotePath.dropLast()) : remotePath
-        let dated = datedSnapshots(from: entries).map(\.path)
-        if !dated.isEmpty { return dated }
-        if entries.contains(where: { $0.name == "latest" }) { return [base + "/latest"] }
-        return [base]
+    /// The parent directory of a path. "/a/b/c" -> "/a/b", "/foo" -> "/", "/" -> "/".
+    static func parentPath(_ path: String) -> String {
+        let p = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
+        guard let idx = p.lastIndex(of: "/") else { return p }
+        return idx == p.startIndex ? "/" : String(p[..<idx])
     }
 }

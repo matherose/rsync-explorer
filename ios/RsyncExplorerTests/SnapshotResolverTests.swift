@@ -62,14 +62,10 @@ final class SnapshotResolverTests: XCTestCase {
         XCTAssertNil(ctx.previousRoot)
     }
 
-    func test_snapshotRoots_all_dated_newest_first() {
-        let entries = [dir("2026-06-05_02-00", 100), dir("2026-06-12_02-00", 200), file("latest", 999)]
-        XCTAssertEqual(SnapshotResolver.snapshotRoots(remotePath: "/b", entries: entries),
-                       ["/b/2026-06-12_02-00", "/b/2026-06-05_02-00"])
-    }
-
-    func test_snapshotRoots_fallback_to_remotePath() {
-        XCTAssertEqual(SnapshotResolver.snapshotRoots(remotePath: "/b", entries: [file("readme.txt", nil)]),
-                       ["/b"])
+    func test_parentPath() {
+        XCTAssertEqual(SnapshotResolver.parentPath("/mnt/nas/BACK_EXT/latest"), "/mnt/nas/BACK_EXT")
+        XCTAssertEqual(SnapshotResolver.parentPath("/mnt/nas/BACK_EXT/"), "/mnt/nas")
+        XCTAssertEqual(SnapshotResolver.parentPath("/foo"), "/")
+        XCTAssertEqual(SnapshotResolver.parentPath("/"), "/")
     }
 }

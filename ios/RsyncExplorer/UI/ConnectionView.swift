@@ -21,7 +21,7 @@ struct ConnectionView: View {
                     TextField("Port", text: $port).keyboardType(.numberPad)
                     TextField("Username", text: $username)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    TextField("Backup root path (contains 'latest')", text: $remotePath)
+                    TextField("Backup folder holding the snapshots, e.g. /mnt/nas/BACK_EXT", text: $remotePath)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
                 }
                 Section("Auth") {
@@ -56,8 +56,19 @@ struct ConnectionView: View {
             let a = try CitadelSFTPService.makeAuth(for: config, secret: secret)
             let svc = CitadelSFTPService(config: config, auth: a)
             try await svc.connect()
-            let entries = try await svc.listDirectory(remotePath)
-            let roots = SnapshotResolver.snapshotRoots(remotePath: remotePath, entries: entries)
+            var roots = SnapshotResolver
+                .datedSnapshots(from: try await svc.listDirectory(remotePath))
+                .map(\.path)
+            if roots.isEmpty {
+                // Path points inside the backup (at 'latest' or one snapshot) — the
+                // dated snapshot folders are one level up.
+                let parent = SnapshotResolver.parentPath(remotePath)
+                if parent != remotePath {
+                    let parentEntries = (try? await svc.listDirectory(parent)) ?? []
+                    roots = SnapshotResolver.datedSnapshots(from: parentEntries).map(\.path)
+                }
+            }
+            if roots.isEmpty { roots = [remotePath] }   // last resort: browse what was given
             onConnected(BrowserSession(service: svc, snapshotRoots: roots))
         } catch {
             self.error = "Connection failed:\n\(error)"

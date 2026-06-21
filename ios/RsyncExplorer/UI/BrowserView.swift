@@ -26,7 +26,7 @@ struct BrowserView: View {
 
     var body: some View {
         NavigationStack {
-            DirectoryView(relPath: "", title: "Backup",
+            DirectoryView(relPath: "", title: "All snapshots (\(session.snapshotRoots.count))",
                           service: session.service,
                           snapshotRoots: session.snapshotRoots,
                           media: $media)
