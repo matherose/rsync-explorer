@@ -7,8 +7,11 @@
 ## Summary
 
 A new, standalone **SwiftUI iOS app** that browses an rsync snapshot backup on a
-NAS over **SFTP** and views its media. It opens on the **latest snapshot**, lets
-you navigate folders like a file browser, and on tap: shows images in a
+NAS over **SFTP** and views its media. It opens on the **`latest` snapshot
+symlink** — which, via `--link-dest` hardlinks, presents the full current
+backup — lets you navigate folders freely, flags files deleted since the
+previous snapshot with a **red dot** (openable from that snapshot), and on tap:
+shows images in a
 swipeable, zoomable **carousel** (all images in the folder) and plays videos in
 an **FFmpeg-backed player** that supports AVC → AV1 across all containers.
 Read-only — no restoring/writing back to the NAS.
@@ -19,12 +22,14 @@ the C engine.
 
 ## Goal & non-goals
 
-**Goal:** On an iPhone, connect to the home NAS, browse the most recent backup,
-and view photos (as a gallery carousel) and videos (with broad codec support).
+**Goal:** On an iPhone, connect to the home NAS, browse the full current backup
+(via the `latest` symlink), and view photos (as a gallery carousel) and videos
+(with broad codec support).
 
-**Non-goals (v1):** restoring/uploading to the NAS, the snapshot history
-timeline and deleted-file view, multi-server management UI, true network
-streaming of video, background/offline sync.
+**Non-goals (v1):** restoring/uploading to the NAS, the full snapshot history
+timeline (we keep only a red-dot marker for files deleted since the previous
+snapshot), multi-server management UI, true network streaming of video,
+background/offline sync.
 
 ## Background & constraints
 
@@ -34,8 +39,8 @@ external binaries**, and ships no system `ssh`/`rsync`. Therefore:
 
 - The C engine's process-spawning parts (`ssh.c`, `scan_remote.c`,
   rsync-based restore) cannot run on iOS and are **not** ported.
-- The remaining engine value (snapshot indexing, deleted-file classification)
-  is out of scope per the "latest backup only" decision.
+- Heavy engine logic (full snapshot indexing, deletion-date classification) is
+  out of scope; we keep only a lightweight `latest`-vs-previous deletion diff.
 - Networking is replaced by **in-process SFTP** (Citadel / SwiftNIO SSH).
 
 rsync `--link-dest` snapshots are ordinary directories with hardlinks on the NAS;
@@ -46,7 +51,7 @@ over SFTP they appear as normal files/folders, so browsing them is transparent.
 | Decision | Choice |
 |---|---|
 | Core use case | File browser + image carousel + video player (read-only) |
-| Snapshot model | Latest snapshot only (plain file browser) |
+| Snapshot model | Browse the `latest` symlink; red dot for files deleted since the previous snapshot (openable from it) |
 | Distribution | Sideload from Mac via Xcode + free Apple ID (7-day expiry) |
 | Architecture | Fresh native SwiftUI app; no C engine reuse |
 | Transport | SFTP over SSH via **Citadel** (ed25519 key + password auth) |
