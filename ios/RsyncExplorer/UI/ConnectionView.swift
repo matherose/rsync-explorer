@@ -57,8 +57,8 @@ struct ConnectionView: View {
             let svc = CitadelSFTPService(config: config, auth: a)
             try await svc.connect()
             let entries = try await svc.listDirectory(remotePath)
-            let ctx = SnapshotResolver.context(remotePath: remotePath, entries: entries)
-            onConnected(BrowserSession(service: svc, context: ctx))
+            let roots = SnapshotResolver.snapshotRoots(remotePath: remotePath, entries: entries)
+            onConnected(BrowserSession(service: svc, snapshotRoots: roots))
         } catch {
             self.error = "Connection failed:\n\(error)"
         }

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct BrowserSession {
     let service: SFTPService
-    let context: SnapshotResolver.Context
+    let snapshotRoots: [String]   // newest -> oldest
 }
 
 enum MediaPresentation: Identifiable {
@@ -22,46 +22,28 @@ enum MediaPresentation: Identifiable {
 struct BrowserView: View {
     let session: BrowserSession
     var onDisconnect: () -> Void
-
-    @StateObject private var root: TreeNode
     @State private var media: MediaPresentation?
-
-    init(session: BrowserSession, onDisconnect: @escaping () -> Void) {
-        self.session = session
-        self.onDisconnect = onDisconnect
-        let rootEntry = RemoteEntry(name: "Backup", path: session.context.latestRoot,
-                                    isDirectory: true, size: 0, modificationDate: nil)
-        _root = StateObject(wrappedValue: TreeNode(entry: rootEntry, isDeleted: false,
-                                                   latestRoot: session.context.latestRoot,
-                                                   previousRoot: session.context.previousRoot))
-    }
 
     var body: some View {
         NavigationStack {
-            List {
-                if root.isLoading && root.children.isEmpty {
-                    HStack { Spacer(); ProgressView(); Spacer() }
+            DirectoryView(relPath: "", title: "Backup",
+                          service: session.service,
+                          snapshotRoots: session.snapshotRoots,
+                          media: $media)
+                .navigationDestination(for: DirRoute.self) { route in
+                    DirectoryView(relPath: route.relPath, title: route.title,
+                                  service: session.service,
+                                  snapshotRoots: session.snapshotRoots,
+                                  media: $media)
                 }
-                ForEach(root.children) { child in
-                    TreeNodeView(node: child,
-                                 service: session.service,
-                                 siblingImages: root.imageChildren,
-                                 onOpenImage: { media = .images(items: $1, start: $0) },
-                                 onOpenVideo: { media = .video($0) },
-                                 onOpenOther: { media = .quicklook($0) })
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("Backup")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Disconnect") {
-                        Task { await session.service.disconnect(); onDisconnect() }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Disconnect") {
+                            Task { await session.service.disconnect(); onDisconnect() }
+                        }
                     }
                 }
-            }
-            .task { await root.loadIfNeeded(service: session.service) }
-            .fullScreenCover(item: $media) { mediaView($0) }
+                .fullScreenCover(item: $media) { mediaView($0) }
         }
     }
 

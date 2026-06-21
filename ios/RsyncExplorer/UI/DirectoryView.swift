@@ -1,0 +1,79 @@
+import SwiftUI
+
+struct DirRoute: Hashable {
+    let relPath: String
+    let title: String
+}
+
+/// One folder, merged across every snapshot (newest -> oldest). Folders push with
+/// Files-app-style navigation; files open media. Deleted items carry a red dot.
+struct DirectoryView: View {
+    let relPath: String
+    let title: String
+    let service: SFTPService
+    let snapshotRoots: [String]
+    @Binding var media: MediaPresentation?
+
+    @State private var items: [SnapshotMerge.Item] = []
+    @State private var loading = true
+    @State private var error: String?
+
+    var body: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red) }
+            ForEach(items) { item in row(item) }
+        }
+        .listStyle(.plain)
+        .overlay { if loading && items.isEmpty { ProgressView() } }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    @ViewBuilder private func row(_ item: SnapshotMerge.Item) -> some View {
+        if item.entry.isDirectory {
+            NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
+                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted)
+            }
+        } else {
+            Button { open(item) } label: {
+                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func childRel(_ name: String) -> String {
+        relPath.isEmpty ? name : relPath + "/" + name
+    }
+
+    private func open(_ item: SnapshotMerge.Item) {
+        switch item.entry.kind {
+        case .image:
+            let images = items.filter { $0.entry.kind == .image }.map(\.entry)
+            media = .images(items: images, start: item.entry)
+        case .video:
+            media = .video(item.entry)
+        default:
+            media = .quicklook(item.entry)
+        }
+    }
+
+    private func load() async {
+        loading = true
+        defer { loading = false }
+        var listings: [[RemoteEntry]] = []
+        for root in snapshotRoots {
+            let folder = relPath.isEmpty ? root : root + "/" + relPath
+            let entries = (try? await service.listDirectory(folder)) ?? []
+            listings.append(entries)
+        }
+        let merged = SnapshotMerge.merge(listings)
+        items = merged.sorted { a, b in
+            if a.entry.isDirectory != b.entry.isDirectory { return a.entry.isDirectory }
+            return a.entry.name.localizedCaseInsensitiveCompare(b.entry.name) == .orderedAscending
+        }
+        error = (items.isEmpty && !snapshotRoots.isEmpty) ? "Empty folder." : nil
+    }
+}
