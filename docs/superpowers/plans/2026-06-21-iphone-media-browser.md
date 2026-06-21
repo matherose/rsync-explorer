@@ -6,7 +6,7 @@
 
 **Architecture:** Native SwiftUI app in a new `ios/` directory. UI talks to an `SFTPService` protocol (real impl backed by Citadel/SwiftNIO-SSH; fake impl for tests/previews). Video plays through MobileVLCKit (FFmpeg decode, VideoToolbox HW + software fallback, Metal render). Secrets in Keychain. No C engine reuse.
 
-**Tech Stack:** Swift 5.9+, SwiftUI, iOS 16+, Citadel (SPM), MobileVLCKit, swift-crypto, ImageIO/Core Image, XcodeGen (reproducible project), XCTest.
+**Tech Stack:** Swift 5.9+, SwiftUI, iOS 17+ (Citadel's floor), Citadel (SPM), MobileVLCKit, CryptoKit, ImageIO/Core Image, XcodeGen (reproducible project), XCTest.
 
 ---
 
@@ -1585,7 +1585,7 @@ git commit -m "docs(ios): build & sideload instructions"
 - Thumbnail cache: Task 17. ✓
 - Keychain secrets + TOFU host key: Task 12. ✓
 - File cache: Task 16. ✓
-- Sideload (XcodeGen, free Apple ID, iOS 16): Tasks 1, 21. ✓
+- Sideload (XcodeGen, free Apple ID, iOS 17): Tasks 1, 21. ✓
 - Out-of-scope items (restore, timeline, streaming, multi-server) intentionally absent. ✓
 
 **Known verifications carried into execution** (from spec open-questions, surfaced at the relevant tasks): Citadel API names & ranged reads (Task 10/17), MobileVLCKit distribution & thumbnailer API (Tasks 11/17), snapshot heuristic vs real naming (Task 10 live check). These are flagged inline as "confirm against resolved version" rather than assumed.

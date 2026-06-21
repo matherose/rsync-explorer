@@ -52,12 +52,12 @@ over SFTP they appear as normal files/folders, so browsing them is transparent.
 | Transport | SFTP over SSH via **Citadel** (ed25519 key + password auth) |
 | Video decode | **MobileVLCKit** (FFmpeg: AVC→AV1, all containers; VideoToolbox HW + software fallback; Metal render) |
 | Thumbnails | On-disk cache; images via ImageIO, videos via VLCKit thumbnailer |
-| Min OS | iOS 16+ |
+| Min OS | iOS 17+ (Citadel requires it) |
 | Location | New `ios/` directory in this repo (own Xcode project + SwiftPM) |
 
 ## Architecture overview
 
-Standalone SwiftUI app, iOS 16+. Dependencies:
+Standalone SwiftUI app, iOS 17+. Dependencies:
 
 - **Citadel** (SPM) — SSH/SFTP; pulls swift-nio-ssh + swift-crypto.
 - **MobileVLCKit** — FFmpeg-based playback + video thumbnails (binary framework).

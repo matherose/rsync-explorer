@@ -2,17 +2,21 @@ name: RsyncExplorer
 options:
   bundleIdPrefix: com.joeltordjman
   deploymentTarget:
-    iOS: "16.0"
-# Dependencies are added at their first-use task (de-risking):
-#   Citadel (SFTP)      -> Phase C
-#   MobileVLCKit (video)-> Phase D
-# Signing for a physical device is set in Xcode GUI; record DEVELOPMENT_TEAM here
-# once chosen so regeneration keeps it. Simulator builds need no team.
+    iOS: "17.0"   # Citadel (SFTP) requires iOS 17.0 minimum
+# MobileVLCKit (video) is added at Phase D. Signing for a physical device is set
+# in Xcode GUI; record DEVELOPMENT_TEAM here once chosen so regeneration keeps it.
+# Simulator builds need no team.
+packages:
+  Citadel:
+    url: https://github.com/orlandos-nl/Citadel.git
+    from: 0.12.1
 targets:
   RsyncExplorer:
     type: application
     platform: iOS
     sources: [RsyncExplorer]
+    dependencies:
+      - package: Citadel
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorer
