@@ -1,12 +1,13 @@
 import SwiftUI
 
 struct RootView: View {
-    // TEMPORARY (Phase C live proof): replaced by OnboardingView/browser in Phase F.
-    var body: some View {
-        LiveSFTPTestView()
-    }
-}
+    @State private var session: BrowserSession?
 
-#Preview {
-    RootView()
+    var body: some View {
+        if let session {
+            BrowserView(session: session) { self.session = nil }
+        } else {
+            ConnectionView { self.session = $0 }
+        }
+    }
 }
