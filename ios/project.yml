@@ -1,0 +1,33 @@
+name: RsyncExplorer
+options:
+  bundleIdPrefix: com.joeltordjman
+  deploymentTarget:
+    iOS: "16.0"
+# Dependencies are added at their first-use task (de-risking):
+#   Citadel (SFTP)      -> Phase C
+#   MobileVLCKit (video)-> Phase D
+# Signing for a physical device is set in Xcode GUI; record DEVELOPMENT_TEAM here
+# once chosen so regeneration keeps it. Simulator builds need no team.
+targets:
+  RsyncExplorer:
+    type: application
+    platform: iOS
+    sources: [RsyncExplorer]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorer
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: rsync explorer
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+  RsyncExplorerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [RsyncExplorerTests]
+    dependencies:
+      - target: RsyncExplorer
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorerTests
