@@ -22,6 +22,17 @@ actor CitadelSFTPService: SFTPService {
         self.auth = auth
     }
 
+    /// Bridges a stored secret (password text or unencrypted ed25519 PEM) to an auth value.
+    static func makeAuth(for config: ServerConfig, secret: String) throws -> SFTPAuth {
+        switch config.authMethod {
+        case .password:
+            return .password(secret)
+        case .ed25519Key:
+            let seed = try OpenSSHKey.ed25519Seed(fromPEM: secret)
+            return .ed25519(try Curve25519.Signing.PrivateKey(rawRepresentation: seed))
+        }
+    }
+
     func connect() async throws {
         let method: SSHAuthenticationMethod
         switch auth {

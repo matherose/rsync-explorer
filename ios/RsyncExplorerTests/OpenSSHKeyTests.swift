@@ -16,7 +16,8 @@ final class OpenSSHKeyTests: XCTestCase {
     static let expectedPubB64 = "AAAAC3NzaC1lZDI1NTE5AAAAINc80NKqNS/vuCtxvu1oIai7NfaKuf6VwjTBiJtCZvWr"
 
     func test_parses_ed25519_and_matches_public_key() throws {
-        let key = try OpenSSHKey.ed25519PrivateKey(fromPEM: Self.fixturePEM)
+        let seed = try OpenSSHKey.ed25519Seed(fromPEM: Self.fixturePEM)
+        let key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
         let raw = key.publicKey.rawRepresentation
         func sshString(_ d: Data) -> Data {
             var out = Data()
@@ -33,6 +34,6 @@ final class OpenSSHKeyTests: XCTestCase {
 
     func test_rejects_garbage_key() {
         let enc = "-----BEGIN OPENSSH PRIVATE KEY-----\nGARBAGE\n-----END OPENSSH PRIVATE KEY-----"
-        XCTAssertThrowsError(try OpenSSHKey.ed25519PrivateKey(fromPEM: enc))
+        XCTAssertThrowsError(try OpenSSHKey.ed25519Seed(fromPEM: enc))
     }
 }

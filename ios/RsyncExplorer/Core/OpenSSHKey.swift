@@ -1,12 +1,12 @@
 import Foundation
-import CryptoKit
 
 enum OpenSSHKeyError: Error { case badFormat, encryptedUnsupported, notEd25519 }
 
 enum OpenSSHKey {
-    /// Parses an unencrypted OpenSSH ed25519 private key PEM into a Curve25519 signing key.
+    /// Parses an unencrypted OpenSSH ed25519 private key PEM into its 32-byte seed.
+    /// Callers build a Curve25519 key (CryptoKit or swift-crypto) from the seed.
     /// Encrypted keys (cipher != "none") are unsupported in v1.
-    static func ed25519PrivateKey(fromPEM pem: String) throws -> Curve25519.Signing.PrivateKey {
+    static func ed25519Seed(fromPEM pem: String) throws -> Data {
         let b64 = pem
             .split(separator: "\n")
             .filter { !$0.hasPrefix("-----") }
@@ -34,8 +34,7 @@ enum OpenSSHKey {
         _ = try p.readSSHString()                        // public key (32 bytes)
         let priv = try p.readSSHString()                 // 64 bytes: seed(32) + pub(32)
         guard priv.count == 64 else { throw OpenSSHKeyError.badFormat }
-        let seed = Data(priv.prefix(32))
-        return try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+        return Data(priv.prefix(32))
     }
 }
 
