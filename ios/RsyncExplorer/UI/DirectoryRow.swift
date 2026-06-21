@@ -8,11 +8,9 @@ struct DirectoryRow: View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .frame(width: 28)
-                .foregroundStyle(isDeleted ? Color.secondary : Color.accentColor)
+                .foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.name)
-                    .lineLimit(1)
-                    .foregroundStyle(isDeleted ? Color.secondary : Color.primary)
+                Text(entry.name).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
@@ -33,8 +31,7 @@ struct DirectoryRow: View {
     }
 
     private var subtitle: String {
-        let suffix = isDeleted ? " · deleted" : ""
-        if entry.isDirectory { return "Folder" + suffix }
-        return ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file) + suffix
+        entry.isDirectory ? "Folder"
+            : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
     }
 }

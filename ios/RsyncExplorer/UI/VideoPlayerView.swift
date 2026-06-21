@@ -1,25 +1,24 @@
 import SwiftUI
 
 struct VideoPlayerView: View {
-    let service: SFTPService
+    let streamServer: LocalStreamServer
     let entry: RemoteEntry
     var onClose: () -> Void
 
-    @State private var localURL: URL?
-    @State private var progress: Double = 0
+    @State private var url: URL?
     @State private var error: String?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
-            if let localURL {
-                VLCPlayerContainer(url: localURL).ignoresSafeArea()
+            if let url {
+                VLCPlayerContainer(url: url).ignoresSafeArea()
             } else if let error {
                 Text(error).foregroundStyle(.white).font(.callout).padding()
             } else {
-                VStack(spacing: 12) {
-                    ProgressView(value: progress).tint(.white).frame(width: 200)
-                    Text("Downloading… \(Int(progress * 100))%").foregroundStyle(.white)
+                VStack(spacing: 10) {
+                    ProgressView().tint(.white)
+                    Text("Opening stream…").foregroundStyle(.white)
                 }
             }
             Button(action: onClose) {
@@ -27,16 +26,12 @@ struct VideoPlayerView: View {
                     .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
             }
         }
-        .task { await load() }
-    }
-
-    private func load() async {
-        do {
-            localURL = try await FileCache.shared.fetch(entry, via: service) { p in
-                Task { @MainActor in progress = p }
+        .task {
+            do {
+                url = try await streamServer.streamURL(path: entry.path, size: entry.size)
+            } catch {
+                self.error = "Couldn't start stream:\n\(error)"
             }
-        } catch {
-            self.error = "Couldn't load video:\n\(error)"
         }
     }
 }

@@ -14,6 +14,11 @@ packages:
     # Community SPM repackaging of VideoLAN's stable MobileVLCKit 3.6.0 binary.
     url: https://github.com/tylerjonesio/vlckit-spm.git
     from: 3.6.0
+  SwiftNIO:
+    # Already pulled transitively by Citadel; declared directly so we can link
+    # NIOHTTP1 for the local streaming bridge.
+    url: https://github.com/apple/swift-nio.git
+    from: 2.50.0
 targets:
   RsyncExplorer:
     type: application
@@ -23,6 +28,12 @@ targets:
       - package: Citadel
       - package: VLCKit
         product: VLCKitSPM
+      - package: SwiftNIO
+        product: NIOCore
+      - package: SwiftNIO
+        product: NIOPosix
+      - package: SwiftNIO
+        product: NIOHTTP1
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorer

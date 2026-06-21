@@ -6,13 +6,15 @@ struct DirRoute: Hashable {
 }
 
 /// One folder, merged across every snapshot (newest -> oldest). Folders push with
-/// Files-app-style navigation; files open media. Deleted items carry a red dot.
+/// Files-app-style navigation; tapping a file opens media (video streams). Long-press
+/// a file for Download. Deleted items carry a red dot but read normally.
 struct DirectoryView: View {
     let relPath: String
     let title: String
     let service: SFTPService
     let snapshotRoots: [String]
     @Binding var media: MediaPresentation?
+    let onDownload: (RemoteEntry) -> Void
 
     @State private var items: [SnapshotMerge.Item] = []
     @State private var loading = true
@@ -41,6 +43,13 @@ struct DirectoryView: View {
                 DirectoryRow(entry: item.entry, isDeleted: item.isDeleted)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button {
+                    onDownload(item.entry)
+                } label: {
+                    Label("Download", systemImage: "arrow.down.circle")
+                }
+            }
         }
     }
 
