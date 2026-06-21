@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// TEMPORARY Phase C harness: type real NAS details, connect over SFTP, and list
-/// the latest snapshot to prove CitadelSFTPService against a live server.
-/// Replaced by OnboardingView + DirectoryView in Phase F.
+private struct PlayerItem: Identifiable { let id = UUID(); let url: URL }
+
+/// TEMPORARY Phase C/D harness: type real NAS details, connect over SFTP, list
+/// the latest snapshot, and download+play a video through VLCKit to prove the
+/// stack against a live server. Replaced by OnboardingView + DirectoryView in Phase F.
 struct LiveSFTPTestView: View {
     @State private var host = ""
     @State private var port = "22"
@@ -13,6 +15,12 @@ struct LiveSFTPTestView: View {
     @State private var status = ""
     @State private var entries: [RemoteEntry] = []
     @State private var busy = false
+
+    // Phase D additions
+    @State private var service: CitadelSFTPService?
+    @State private var videoPath = ""
+    @State private var downloadStatus = ""
+    @State private var playerItem: PlayerItem?
 
     var body: some View {
         NavigationStack {
@@ -57,8 +65,23 @@ struct LiveSFTPTestView: View {
                         }
                     }
                 }
+                if service != nil {
+                    Section("Play a video (Phase D)") {
+                        TextField("Full path to a video on the NAS", text: $videoPath, axis: .vertical)
+                            .lineLimit(2...4).font(.caption.monospaced())
+                            .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        Button("Download & play") { Task { await playVideo() } }
+                            .disabled(videoPath.isEmpty || busy)
+                        if !downloadStatus.isEmpty {
+                            Text(downloadStatus).font(.caption).textSelection(.enabled)
+                        }
+                    }
+                }
             }
             .navigationTitle("Live SFTP test")
+            .fullScreenCover(item: $playerItem) { item in
+                VLCPlayerView(url: item.url) { playerItem = nil }
+            }
         }
     }
 
@@ -73,11 +96,29 @@ struct LiveSFTPTestView: View {
             try await svc.connect()
             let snap = try await svc.resolveLatestSnapshot(under: remotePath)
             let list = try await svc.listDirectory(snap)
-            await svc.disconnect()
+            service = svc
+            if videoPath.isEmpty { videoPath = snap + "/" }
             status = "OK — latest snapshot:\n\(snap)\n\(list.count) entries"
             entries = list
         } catch {
             status = "FAILED:\n\(error)"
+        }
+    }
+
+    private func playVideo() async {
+        guard let svc = service else { return }
+        busy = true; downloadStatus = "Downloading…"
+        defer { busy = false }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + "_" + (videoPath as NSString).lastPathComponent)
+        do {
+            try await svc.download(videoPath, to: tmp) { p in
+                Task { @MainActor in downloadStatus = "Downloading… \(Int(p * 100))%" }
+            }
+            downloadStatus = "Downloaded — opening player"
+            playerItem = PlayerItem(url: tmp)
+        } catch {
+            downloadStatus = "Download FAILED:\n\(error)"
         }
     }
 }

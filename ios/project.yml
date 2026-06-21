@@ -10,6 +10,10 @@ packages:
   Citadel:
     url: https://github.com/orlandos-nl/Citadel.git
     from: 0.12.1
+  VLCKit:
+    # Community SPM repackaging of VideoLAN's stable MobileVLCKit 3.6.0 binary.
+    url: https://github.com/tylerjonesio/vlckit-spm.git
+    from: 3.6.0
 targets:
   RsyncExplorer:
     type: application
@@ -17,6 +21,8 @@ targets:
     sources: [RsyncExplorer]
     dependencies:
       - package: Citadel
+      - package: VLCKit
+        product: VLCKitSPM
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorer
