@@ -54,7 +54,8 @@ over SFTP they appear as normal files/folders, so browsing them is transparent.
 | Snapshot model | Union of all snapshots (newest→oldest), Files-style push navigation; red dot for files not in the newest snapshot, openable from the newest snapshot that has them |
 | Distribution | Sideload from Mac via Xcode + free Apple ID (7-day expiry) |
 | Architecture | Fresh native SwiftUI app; no C engine reuse |
-| Transport | SFTP over SSH via **Citadel** (ed25519 key + password auth) |
+| Transport | SFTP over SSH via **Citadel**; username+password auth saved in Keychain, auto-connect on launch (ed25519 import code retained but not surfaced in UI) |
+| Video | Tap = **stream** via a local SwiftNIO HTTP/Range bridge over SFTP; long-press = Download (share sheet). Player has scrubber/play-pause/auto-hiding controls |
 | Video decode | **MobileVLCKit** (FFmpeg: AVC→AV1, all containers; VideoToolbox HW + software fallback; Metal render) |
 | Thumbnails | On-disk cache; images via ImageIO, videos via VLCKit thumbnailer |
 | Min OS | iOS 17+ (Citadel requires it) |
