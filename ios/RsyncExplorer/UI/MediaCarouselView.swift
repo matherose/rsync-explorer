@@ -43,7 +43,7 @@ private struct MediaPageView: View {
         case .image:
             ZoomableImageView(service: service, entry: entry)
         case .video, .audio:
-            CarouselPlayerView(entry: entry, isActive: isActive, streamServer: streamServer)
+            CarouselPlayerView(entry: entry, isActive: isActive, service: service, streamServer: streamServer)
         default:
             Color.black
         }
