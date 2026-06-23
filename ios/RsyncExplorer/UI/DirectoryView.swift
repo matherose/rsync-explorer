@@ -59,13 +59,10 @@ struct DirectoryView: View {
     }
 
     private func open(_ item: SnapshotMerge.Item) {
-        switch item.entry.kind {
-        case .image:
-            let images = items.filter { $0.entry.kind == .image }.map(\.entry)
-            media = .images(items: images, start: item.entry)
-        case .video:
-            media = .video(item.entry)
-        default:
+        if item.entry.kind.isMedia {
+            let mediaItems = items.filter { $0.entry.kind.isMedia }.map(\.entry)
+            media = .media(items: mediaItems, start: item.entry)
+        } else {
             media = .quicklook(item.entry)
         }
     }

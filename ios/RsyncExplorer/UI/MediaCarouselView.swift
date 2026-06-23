@@ -1,28 +1,52 @@
 import SwiftUI
 
+/// Full-screen swipeable carousel over all media (images, video, audio) in a folder.
+/// No page dots; one global close button. Video/audio auto-play only on the active page.
 struct MediaCarouselView: View {
     let service: SFTPService
-    let images: [RemoteEntry]
+    let streamServer: LocalStreamServer
+    let items: [RemoteEntry]
     let start: RemoteEntry
     var onClose: () -> Void
+
     @State private var index = 0
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
-                ForEach(Array(images.enumerated()), id: \.element.id) { i, entry in
-                    ZoomableImageView(service: service, entry: entry).tag(i)
+                ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
+                    MediaPageView(entry: entry, isActive: index == i,
+                                  service: service, streamServer: streamServer)
+                        .tag(i)
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
             Button(action: onClose) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
             }
         }
-        .onAppear { index = images.firstIndex(of: start) ?? 0 }
+        .onAppear { index = items.firstIndex(of: start) ?? 0 }
+    }
+}
+
+private struct MediaPageView: View {
+    let entry: RemoteEntry
+    let isActive: Bool
+    let service: SFTPService
+    let streamServer: LocalStreamServer
+
+    var body: some View {
+        switch entry.kind {
+        case .image:
+            ZoomableImageView(service: service, entry: entry)
+        case .video, .audio:
+            CarouselPlayerView(entry: entry, isActive: isActive, streamServer: streamServer)
+        default:
+            Color.black
+        }
     }
 }
 

@@ -24,6 +24,7 @@ struct DirectoryRow: View {
             guard thumb == nil, entry.kind == .image || entry.kind == .video else { return }
             thumb = await thumbnails.thumbnail(for: entry)
         }
+        // (audio shows the music icon; no thumbnail)
     }
 
     @ViewBuilder private var thumbView: some View {
@@ -53,6 +54,7 @@ struct DirectoryRow: View {
         case .folder: return "folder.fill"
         case .image: return "photo"
         case .video: return "play.rectangle.fill"
+        case .audio: return "music.note"
         case .other: return "doc"
         }
     }

@@ -6,14 +6,12 @@ struct BrowserSession {
 }
 
 enum MediaPresentation: Identifiable {
-    case images(items: [RemoteEntry], start: RemoteEntry)
-    case video(RemoteEntry)
+    case media(items: [RemoteEntry], start: RemoteEntry)
     case quicklook(RemoteEntry)
 
     var id: String {
         switch self {
-        case .images(_, let s): return "img:" + s.path
-        case .video(let e): return "vid:" + e.path
+        case .media(_, let s): return "media:" + s.path
         case .quicklook(let e): return "ql:" + e.path
         }
     }
@@ -73,10 +71,9 @@ struct BrowserView: View {
 
     @ViewBuilder private func mediaView(_ p: MediaPresentation) -> some View {
         switch p {
-        case .images(let items, let start):
-            MediaCarouselView(service: session.service, images: items, start: start) { media = nil }
-        case .video(let e):
-            VideoPlayerView(streamServer: streamServer, entry: e) { media = nil }
+        case .media(let items, let start):
+            MediaCarouselView(service: session.service, streamServer: streamServer,
+                              items: items, start: start) { media = nil }
         case .quicklook(let e):
             QuickLookView(service: session.service, entry: e) { media = nil }
         }
