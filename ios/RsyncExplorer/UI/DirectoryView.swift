@@ -10,8 +10,8 @@ enum SortKey: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// One folder, merged across every snapshot. Files-app navigation; tap media opens
-/// the carousel. Sort / type-filter / name-search applied locally over the listing.
+/// One folder, merged across every snapshot. List or grid; Files-app navigation;
+/// tap media opens the carousel. Sort / type-filter / name-search applied locally.
 struct DirectoryView: View {
     let relPath: String
     let title: String
@@ -29,6 +29,10 @@ struct DirectoryView: View {
     @State private var ascending = true
     @State private var enabledKinds: Set<FileKind> = [.image, .video, .audio, .other]
     @State private var searchText = ""
+    @State private var gridMode = false
+    @State private var infoItem: SnapshotMerge.Item?
+
+    private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
     private var displayedItems: [SnapshotMerge.Item] {
         let filtered = allItems.filter { item in
@@ -52,18 +56,79 @@ struct DirectoryView: View {
     }
 
     var body: some View {
-        List {
-            if let error { Text(error).foregroundStyle(.red) }
-            ForEach(displayedItems) { item in row(item) }
+        Group {
+            if gridMode { gridContent } else { listContent }
         }
-        .listStyle(.plain)
         .overlay { if loading && allItems.isEmpty { ProgressView() } }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search this folder")
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { sortFilterMenu } }
-        .refreshable { await load() }
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button { gridMode.toggle() } label: {
+                    Image(systemName: gridMode ? "list.bullet" : "square.grid.2x2")
+                }
+                sortFilterMenu
+            }
+        }
         .task { await load() }
+        .sheet(item: $infoItem) { FileInfoView(item: $0) }
+    }
+
+    private var listContent: some View {
+        List {
+            if let error { Text(error).foregroundStyle(.red) }
+            ForEach(displayedItems) { item in
+                if item.entry.isDirectory {
+                    NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
+                        DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                    }
+                    .contextMenu { infoButton(item) }
+                } else {
+                    Button { open(item) } label: {
+                        DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu { fileMenu(item) }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .refreshable { await load() }
+    }
+
+    private var gridContent: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(displayedItems) { item in
+                    if item.entry.isDirectory {
+                        NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
+                            DirectoryGridCell(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { infoButton(item) }
+                    } else {
+                        Button { open(item) } label: {
+                            DirectoryGridCell(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu { fileMenu(item) }
+                    }
+                }
+            }
+            .padding(8)
+        }
+        .refreshable { await load() }
+    }
+
+    @ViewBuilder private func fileMenu(_ item: SnapshotMerge.Item) -> some View {
+        Button { open(item) } label: { Label("Open", systemImage: "eye") }
+        Button { onDownload(item.entry) } label: { Label("Download", systemImage: "arrow.down.circle") }
+        infoButton(item)
+    }
+
+    private func infoButton(_ item: SnapshotMerge.Item) -> some View {
+        Button { infoItem = item } label: { Label("Info", systemImage: "info.circle") }
     }
 
     private var sortFilterMenu: some View {
@@ -90,24 +155,6 @@ struct DirectoryView: View {
     private func kindBinding(_ kind: FileKind) -> Binding<Bool> {
         Binding(get: { enabledKinds.contains(kind) },
                 set: { on in if on { enabledKinds.insert(kind) } else { enabledKinds.remove(kind) } })
-    }
-
-    @ViewBuilder private func row(_ item: SnapshotMerge.Item) -> some View {
-        if item.entry.isDirectory {
-            NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
-                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
-            }
-        } else {
-            Button { open(item) } label: {
-                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
-            }
-            .buttonStyle(.plain)
-            .contextMenu {
-                Button { onDownload(item.entry) } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                }
-            }
-        }
     }
 
     private func childRel(_ name: String) -> String {
