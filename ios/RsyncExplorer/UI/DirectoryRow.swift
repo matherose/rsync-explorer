@@ -3,12 +3,13 @@ import SwiftUI
 struct DirectoryRow: View {
     let entry: RemoteEntry
     let isDeleted: Bool
+    let thumbnails: ThumbnailService
+
+    @State private var thumb: UIImage?
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .frame(width: 28)
-                .foregroundStyle(Color.accentColor)
+            thumbView
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).lineLimit(1)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
@@ -19,6 +20,32 @@ struct DirectoryRow: View {
             }
         }
         .contentShape(Rectangle())
+        .task(id: entry.id) {
+            guard thumb == nil, entry.kind == .image || entry.kind == .video else { return }
+            thumb = await thumbnails.thumbnail(for: entry)
+        }
+    }
+
+    @ViewBuilder private var thumbView: some View {
+        ZStack {
+            if let thumb {
+                Image(uiImage: thumb).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Image(systemName: icon).foregroundStyle(Color.accentColor)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(alignment: .bottomTrailing) {
+            if entry.kind == .video {
+                Image(systemName: "play.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .shadow(radius: 1)
+                    .padding(2)
+            }
+        }
     }
 
     private var icon: String {

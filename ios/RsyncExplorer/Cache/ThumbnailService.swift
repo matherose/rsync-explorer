@@ -1,0 +1,82 @@
+import UIKit
+import ImageIO
+import VLCKitSPM
+
+/// Generates + caches list thumbnails. Images via ImageIO; videos via VLCKit's
+/// thumbnailer pointed at the streaming URL (grabs a frame over HTTP range, no
+/// full download). Cheap value type holding shared references.
+struct ThumbnailService {
+    let service: SFTPService
+    let streamServer: LocalStreamServer
+    private let cache = ThumbnailCache.shared
+
+    func thumbnail(for e: RemoteEntry) async -> UIImage? {
+        if let cached = cache.image(for: e) { return cached }
+        let img: UIImage?
+        switch e.kind {
+        case .image: img = await imageThumb(e)
+        case .video: img = await videoThumb(e)
+        default: img = nil
+        }
+        if let img { cache.store(img, for: e) }
+        return img
+    }
+
+    private func imageThumb(_ e: RemoteEntry) async -> UIImage? {
+        guard let url = try? await FileCache.shared.fetch(e, via: service, progress: { _ in }),
+              let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 200,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
+    private func videoThumb(_ e: RemoteEntry) async -> UIImage? {
+        guard let url = try? await streamServer.streamURL(path: e.path, size: e.size) else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            Task { @MainActor in
+                let delegate = VideoThumbDelegate { cont.resume(returning: $0) }
+                delegate.start(media: VLCMedia(url: url))
+            }
+        }
+    }
+}
+
+@MainActor
+private final class VideoThumbDelegate: NSObject, VLCMediaThumbnailerDelegate {
+    private let completion: (UIImage?) -> Void
+    private var thumbnailer: VLCMediaThumbnailer?
+    private var selfRef: VideoThumbDelegate?
+    private var done = false
+
+    init(completion: @escaping (UIImage?) -> Void) { self.completion = completion }
+
+    func start(media: VLCMedia) {
+        selfRef = self   // keep alive until the (weak) delegate callback fires
+        let t = VLCMediaThumbnailer(media: media, andDelegate: self)
+        t.thumbnailWidth = 200
+        t.thumbnailHeight = 200
+        thumbnailer = t
+        t.fetchThumbnail()
+    }
+
+    private func finish(_ image: UIImage?) {
+        guard !done else { return }
+        done = true
+        completion(image)
+        thumbnailer = nil
+        selfRef = nil
+    }
+
+    nonisolated func mediaThumbnailerDidTimeOut(_ mediaThumbnailer: VLCMediaThumbnailer) {
+        Task { @MainActor in self.finish(nil) }
+    }
+
+    nonisolated func mediaThumbnailer(_ mediaThumbnailer: VLCMediaThumbnailer, didFinishThumbnail thumbnail: CGImage) {
+        let img = UIImage(cgImage: thumbnail)
+        Task { @MainActor in self.finish(img) }
+    }
+}

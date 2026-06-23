@@ -33,15 +33,19 @@ struct BrowserView: View {
         _streamServer = State(initialValue: LocalStreamServer(service: session.service))
     }
 
+    private var thumbnails: ThumbnailService {
+        ThumbnailService(service: session.service, streamServer: streamServer)
+    }
+
     var body: some View {
         NavigationStack {
             DirectoryView(relPath: "", title: "All snapshots (\(session.snapshotRoots.count))",
                           service: session.service, snapshotRoots: session.snapshotRoots,
-                          media: $media, onDownload: download)
+                          thumbnails: thumbnails, media: $media, onDownload: download)
                 .navigationDestination(for: DirRoute.self) { route in
                     DirectoryView(relPath: route.relPath, title: route.title,
                                   service: session.service, snapshotRoots: session.snapshotRoots,
-                                  media: $media, onDownload: download)
+                                  thumbnails: thumbnails, media: $media, onDownload: download)
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {

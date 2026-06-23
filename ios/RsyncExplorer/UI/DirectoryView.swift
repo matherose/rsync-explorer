@@ -13,6 +13,7 @@ struct DirectoryView: View {
     let title: String
     let service: SFTPService
     let snapshotRoots: [String]
+    let thumbnails: ThumbnailService
     @Binding var media: MediaPresentation?
     let onDownload: (RemoteEntry) -> Void
 
@@ -36,11 +37,11 @@ struct DirectoryView: View {
     @ViewBuilder private func row(_ item: SnapshotMerge.Item) -> some View {
         if item.entry.isDirectory {
             NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
-                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted)
+                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
             }
         } else {
             Button { open(item) } label: {
-                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted)
+                DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
             }
             .buttonStyle(.plain)
             .contextMenu {
