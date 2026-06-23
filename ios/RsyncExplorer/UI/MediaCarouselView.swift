@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Full-screen swipeable carousel over all media (images, video, audio) in a folder.
-/// No page dots. Top bar: share + close. Swipe down from the top to dismiss.
+/// No page dots. Close button top-right; swipe down from the top to dismiss.
 /// Video/audio auto-play only on the active page.
 struct MediaCarouselView: View {
     let service: SFTPService
@@ -11,11 +11,9 @@ struct MediaCarouselView: View {
     var onClose: () -> Void
 
     @State private var index = 0
-    @State private var shareItem: ShareItem?
-    @State private var sharing = false
 
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
@@ -27,22 +25,12 @@ struct MediaCarouselView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
 
-            HStack {
-                Button { Task { await share() } } label: {
-                    Image(systemName: sharing ? "arrow.down.circle" : "square.and.arrow.up")
-                        .font(.title2).foregroundStyle(.white.opacity(0.9))
-                }
-                .disabled(sharing)
-                Spacer()
-                Button(action: onClose) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.largeTitle).foregroundStyle(.white.opacity(0.9))
-                }
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
             }
-            .padding(.horizontal).padding(.top, 8)
         }
         .onAppear { index = items.firstIndex(of: start) ?? 0 }
-        .sheet(item: $shareItem) { ActivityView(url: $0.url) }
         .simultaneousGesture(
             DragGesture(minimumDistance: 30).onEnded { v in
                 // Pull down from near the top to dismiss (avoids fighting lyrics scroll).
@@ -53,15 +41,6 @@ struct MediaCarouselView: View {
                 }
             }
         )
-    }
-
-    private func share() async {
-        guard items.indices.contains(index) else { return }
-        sharing = true
-        defer { sharing = false }
-        if let url = try? await FileCache.shared.fetch(items[index], via: service, progress: { _ in }) {
-            shareItem = ShareItem(url: url)
-        }
     }
 }
 

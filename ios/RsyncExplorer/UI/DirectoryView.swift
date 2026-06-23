@@ -31,6 +31,8 @@ struct DirectoryView: View {
     @State private var searchText = ""
     @State private var gridMode = false
     @State private var infoItem: SnapshotMerge.Item?
+    @State private var searchResults: [SearchHit]?
+    @State private var searching = false
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
@@ -57,12 +59,16 @@ struct DirectoryView: View {
 
     var body: some View {
         Group {
-            if gridMode { gridContent } else { listContent }
+            if let hits = searchResults { searchList(hits) }
+            else if gridMode { gridContent }
+            else { listContent }
         }
-        .overlay { if loading && allItems.isEmpty { ProgressView() } }
+        .overlay { if (loading && allItems.isEmpty) || searching { ProgressView() } }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "Search this folder")
+        .searchable(text: $searchText, prompt: "Search — press return for subfolders")
+        .onSubmit(of: .search) { Task { await deepSearch() } }
+        .onChange(of: searchText) { _, value in if value.isEmpty { searchResults = nil } }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { gridMode.toggle() } label: {
@@ -167,6 +173,61 @@ struct DirectoryView: View {
             media = .media(items: mediaItems, start: item.entry)
         } else {
             media = .quicklook(item.entry)
+        }
+    }
+
+    private func deepSearch() async {
+        guard !searchText.isEmpty, let root = snapshotRoots.first else { return }
+        searching = true
+        defer { searching = false }
+        searchResults = await RecursiveSearch.run(query: searchText, baseRel: relPath,
+                                                   root: root, service: service)
+    }
+
+    @ViewBuilder private func searchList(_ hits: [SearchHit]) -> some View {
+        List {
+            if hits.isEmpty {
+                Text("No matches in this folder or its subfolders.").foregroundStyle(.secondary)
+            }
+            ForEach(hits) { hit in
+                if hit.entry.isDirectory {
+                    NavigationLink(value: DirRoute(relPath: hit.relPath, title: hit.entry.name)) {
+                        searchRow(hit)
+                    }
+                } else {
+                    Button { openHit(hit) } label: { searchRow(hit) }.buttonStyle(.plain)
+                }
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private func searchRow(_ hit: SearchHit) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: hit.entry)).frame(width: 28).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(hit.entry.name).lineLimit(1)
+                Text(hit.location.isEmpty ? "/" : hit.location)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+
+    private func openHit(_ hit: SearchHit) {
+        if hit.entry.kind.isMedia {
+            media = .media(items: [hit.entry], start: hit.entry)
+        } else {
+            media = .quicklook(hit.entry)
+        }
+    }
+
+    private func icon(for entry: RemoteEntry) -> String {
+        switch entry.kind {
+        case .folder: "folder.fill"
+        case .image: "photo"
+        case .video: "play.rectangle.fill"
+        case .audio: "music.note"
+        case .other: "doc"
         }
     }
 

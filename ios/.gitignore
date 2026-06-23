@@ -1,6 +1,9 @@
 # XcodeGen regenerates this from project.yml
 *.xcodeproj
 
+# Generated from project.yml by XcodeGen
+RsyncExplorer/Info.plist
+
 # Build output
 .build/
 DerivedData*/

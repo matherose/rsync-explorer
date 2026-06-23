@@ -22,7 +22,7 @@ struct BrowserView: View {
     var onDisconnect: () -> Void
 
     @State private var media: MediaPresentation?
-    @State private var share: ShareItem?
+    @State private var downloadMessage: String?
     @State private var showSettings = false
     @State private var streamServer: LocalStreamServer
 
@@ -52,8 +52,12 @@ struct BrowserView: View {
                     }
                 }
                 .fullScreenCover(item: $media) { mediaView($0) }
-                .sheet(item: $share) { ActivityView(url: $0.url) }
                 .sheet(isPresented: $showSettings) { SettingsView(onDisconnect: disconnect) }
+                .alert(downloadMessage ?? "",
+                       isPresented: Binding(get: { downloadMessage != nil },
+                                            set: { if !$0 { downloadMessage = nil } })) {
+                    Button("OK", role: .cancel) {}
+                }
         }
     }
 
@@ -67,8 +71,17 @@ struct BrowserView: View {
 
     private func download(_ entry: RemoteEntry) {
         Task {
-            if let url = try? await FileCache.shared.fetch(entry, via: session.service, progress: { _ in }) {
-                await MainActor.run { share = ShareItem(url: url) }
+            do {
+                let cached = try await FileCache.shared.fetch(entry, via: session.service, progress: { _ in })
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let dest = docs.appendingPathComponent(entry.name)
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.copyItem(at: cached, to: dest)
+                await MainActor.run {
+                    downloadMessage = "Saved “\(entry.name)” to Files → On My iPhone → RsyncFS."
+                }
+            } catch {
+                await MainActor.run { downloadMessage = "Download failed." }
             }
         }
     }
