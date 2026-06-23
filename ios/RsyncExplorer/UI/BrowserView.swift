@@ -23,6 +23,7 @@ struct BrowserView: View {
 
     @State private var media: MediaPresentation?
     @State private var share: ShareItem?
+    @State private var showSettings = false
     @State private var streamServer: LocalStreamServer
 
     init(session: BrowserSession, onDisconnect: @escaping () -> Void) {
@@ -46,18 +47,21 @@ struct BrowserView: View {
                                   thumbnails: thumbnails, media: $media, onDownload: download)
                 }
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Disconnect") {
-                            Task {
-                                await streamServer.shutdown()
-                                await session.service.disconnect()
-                                onDisconnect()
-                            }
-                        }
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { showSettings = true } label: { Image(systemName: "gearshape") }
                     }
                 }
                 .fullScreenCover(item: $media) { mediaView($0) }
                 .sheet(item: $share) { ActivityView(url: $0.url) }
+                .sheet(isPresented: $showSettings) { SettingsView(onDisconnect: disconnect) }
+        }
+    }
+
+    private func disconnect() {
+        Task {
+            await streamServer.shutdown()
+            await session.service.disconnect()
+            onDisconnect()
         }
     }
 
