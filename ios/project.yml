@@ -39,8 +39,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.joeltordjman.RsyncExplorer
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_CFBundleDisplayName: rsync explorer
-        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "rsync explorer connects to your NAS on your local network over SFTP."
+        INFOPLIST_KEY_CFBundleDisplayName: RsyncFS
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "RsyncFS connects to your NAS on your local network over SFTP."
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.9"
   RsyncExplorerTests:
