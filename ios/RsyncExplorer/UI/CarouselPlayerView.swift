@@ -15,8 +15,10 @@ struct CarouselPlayerView: View {
     @State private var controlsVisible = true
     @State private var dragPosition: Double?
     @State private var hideTask: Task<Void, Never>?
+    @State private var showLyrics = true
 
     private var isAudio: Bool { entry.kind == .audio }
+    private var displayName: String { (entry.name as NSString).deletingPathExtension }
 
     var body: some View {
         ZStack {
@@ -54,15 +56,23 @@ struct CarouselPlayerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.top, 36)
 
-            Text(model.title ?? entry.name).foregroundStyle(.white).font(.headline)
+            Text(displayName).foregroundStyle(.white).font(.headline)
                 .multilineTextAlignment(.center).lineLimit(2).padding(.horizontal)
             if let artist = model.artist {
                 Text(artist).foregroundStyle(.white.opacity(0.7)).font(.subheadline)
             }
 
             if let lyrics {
-                LyricsView(lines: lyrics, currentTimeMs: model.timeMs)
-                    .frame(maxHeight: .infinity)
+                Button { withAnimation { showLyrics.toggle() } } label: {
+                    Label(showLyrics ? "Hide lyrics" : "Show lyrics", systemImage: "quote.bubble")
+                        .font(.caption).foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(.top, 2)
+                if showLyrics {
+                    LyricsView(lines: lyrics, currentTimeMs: model.timeMs).frame(maxHeight: .infinity)
+                } else {
+                    Spacer()
+                }
             } else {
                 Spacer()
             }
