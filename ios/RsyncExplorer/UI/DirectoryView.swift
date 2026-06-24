@@ -33,6 +33,7 @@ struct DirectoryView: View {
     @State private var infoItem: SnapshotMerge.Item?
     @State private var searchResults: [SearchHit]?
     @State private var searching = false
+    @State private var searchTask: Task<Void, Never>?
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
@@ -67,8 +68,13 @@ struct DirectoryView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search — press return for subfolders")
-        .onSubmit(of: .search) { Task { await deepSearch() } }
-        .onChange(of: searchText) { _, value in if value.isEmpty { searchResults = nil } }
+        .onSubmit(of: .search) {
+            searchTask?.cancel()
+            searchTask = Task { await deepSearch() }
+        }
+        .onChange(of: searchText) { _, value in
+            if value.isEmpty { searchTask?.cancel(); searchResults = nil }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { gridMode.toggle() } label: {
@@ -177,11 +183,12 @@ struct DirectoryView: View {
     }
 
     private func deepSearch() async {
-        guard !searchText.isEmpty, let root = snapshotRoots.first else { return }
+        guard !searchText.isEmpty else { return }
         searching = true
         defer { searching = false }
-        searchResults = await RecursiveSearch.run(query: searchText, baseRel: relPath,
-                                                   root: root, service: service)
+        let hits = await RecursiveSearch.run(query: searchText, baseRel: relPath,
+                                             roots: snapshotRoots, service: service)
+        if !Task.isCancelled { searchResults = hits }
     }
 
     @ViewBuilder private func searchList(_ hits: [SearchHit]) -> some View {
@@ -209,6 +216,10 @@ struct DirectoryView: View {
                 Text(hit.entry.name).lineLimit(1)
                 Text(hit.location.isEmpty ? "/" : hit.location)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if hit.isDeleted {
+                Circle().fill(.red).frame(width: 9, height: 9)
             }
         }
     }
