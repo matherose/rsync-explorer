@@ -33,9 +33,28 @@ struct DirectoryGridCell: View {
                 .lineLimit(1)
                 .foregroundStyle(.primary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
         .task(id: entry.id) {
             guard thumb == nil, entry.kind == .image || entry.kind == .video else { return }
             thumb = await thumbnails.thumbnail(for: entry)
+        }
+    }
+
+    /// One spoken phrase per cell: name, kind, and deleted status.
+    private var accessibilityLabel: String {
+        var parts = [entry.name, kindLabel]
+        if isDeleted { parts.append("deleted") }
+        return parts.joined(separator: ", ")
+    }
+
+    private var kindLabel: String {
+        switch entry.kind {
+        case .folder: return "Folder"
+        case .image: return "Image"
+        case .video: return "Video"
+        case .audio: return "Audio"
+        case .other: return "File"
         }
     }
 

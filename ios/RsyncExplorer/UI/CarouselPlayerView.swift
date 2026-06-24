@@ -65,6 +65,7 @@ struct CarouselPlayerView: View {
             .frame(maxWidth: 220, maxHeight: 220)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.top, 36)
+            .accessibilityHidden(true)
 
             Text(displayName).foregroundStyle(.white).font(.headline)
                 .multilineTextAlignment(.center).lineLimit(2).padding(.horizontal)
@@ -112,7 +113,9 @@ struct CarouselPlayerView: View {
                 Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title2).foregroundStyle(.white).frame(width: 30)
             }
+            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
             Text(timeString(model.timeMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
+                .accessibilityHidden(true)
             Slider(value: positionBinding, in: 0...1) { editing in
                 model.isSeeking = editing
                 if editing {
@@ -124,7 +127,10 @@ struct CarouselPlayerView: View {
                 }
             }
             .tint(.white)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(timeString(model.timeMs)) of \(timeString(model.lengthMs))")
             Text(timeString(model.lengthMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
+                .accessibilityHidden(true)
             if !isAudio && model.hasSelectableTracks {
                 tracksMenu
             }
@@ -156,6 +162,7 @@ struct CarouselPlayerView: View {
         } label: {
             Image(systemName: "captions.bubble").font(.title3).foregroundStyle(.white).frame(width: 30)
         }
+        .accessibilityLabel("Audio and subtitle tracks")
     }
 
     @ViewBuilder private func trackLabel(_ name: String, selected: Bool) -> some View {

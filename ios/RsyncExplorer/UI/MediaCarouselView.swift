@@ -39,6 +39,7 @@ struct MediaCarouselView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
             }
+            .accessibilityLabel("Close")
         }
         .onAppear { index = items.firstIndex(of: start) ?? 0 }
         .simultaneousGesture(
@@ -89,6 +90,7 @@ struct ZoomableImageView: View {
                         .scaledToFit()
                         .frame(width: geo.size.width, height: geo.size.height)
                         .scaleEffect(scale)
+                        .accessibilityLabel(entry.name)
                         .gesture(
                             MagnificationGesture()
                                 .onChanged { scale = max(1, min($0, 5)) }

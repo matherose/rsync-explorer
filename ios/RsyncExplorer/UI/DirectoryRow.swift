@@ -20,11 +20,33 @@ struct DirectoryRow: View {
             }
         }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
         .task(id: entry.id) {
             guard thumb == nil, entry.kind == .image || entry.kind == .video else { return }
             thumb = await thumbnails.thumbnail(for: entry)
         }
         // (audio shows the music icon; no thumbnail)
+    }
+
+    /// One spoken phrase per row: name, kind, size (files only), and deleted status.
+    private var accessibilityLabel: String {
+        var parts = [entry.name, kindLabel]
+        if !entry.isDirectory {
+            parts.append(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
+        }
+        if isDeleted { parts.append("deleted") }
+        return parts.joined(separator: ", ")
+    }
+
+    private var kindLabel: String {
+        switch entry.kind {
+        case .folder: return "Folder"
+        case .image: return "Image"
+        case .video: return "Video"
+        case .audio: return "Audio"
+        case .other: return "File"
+        }
     }
 
     @ViewBuilder private var thumbView: some View {
