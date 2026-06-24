@@ -16,6 +16,7 @@ struct CarouselPlayerView: View {
     @State private var dragPosition: Double?
     @State private var hideTask: Task<Void, Never>?
     @State private var showLyrics = true
+    @State private var subtitlesLoaded = false
 
     private var isAudio: Bool { entry.kind == .audio }
     private var displayName: String { (entry.name as NSString).deletingPathExtension }
@@ -38,6 +39,15 @@ struct CarouselPlayerView: View {
         }
         .task(id: isActive) { await update() }
         .task { if isAudio { lyrics = await LyricsLoader.loadLRC(for: entry, via: service) } }
+        .task(id: url) {
+            // Once the stream URL exists (player has attached), pull in any sidecar
+            // .srt/.ass/etc. next to the video so they show up in the tracks menu.
+            guard !isAudio, url != nil, !subtitlesLoaded else { return }
+            subtitlesLoaded = true
+            for sub in await SubtitleLoader.sidecarSubtitles(for: entry, via: service) {
+                model.addSubtitle(sub)
+            }
+        }
         .onDisappear { model.stop(); hideTask?.cancel() }
     }
 

@@ -52,6 +52,13 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
         currentSubtitleTrackID = id
     }
 
+    /// Adds an external subtitle file (downloaded sidecar) as a selectable track,
+    /// without forcing it on. Refreshes the track list so the menu picks it up.
+    func addSubtitle(_ url: URL) {
+        player.addPlaybackSlave(url, type: .subtitle, enforce: false)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.refreshTracks() }
+    }
+
     /// Reads the available/selected audio + subtitle tracks from VLC. They only
     /// exist once the streams are open, so this is called on every state change.
     private func refreshTracks() {

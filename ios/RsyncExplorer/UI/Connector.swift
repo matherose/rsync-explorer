@@ -11,7 +11,7 @@ enum Connector {
                                   authMethod: .password)
         let auth = try CitadelSFTPService.makeAuth(for: config, secret: password)
         let svc = CitadelSFTPService(config: config, auth: auth)
-        try await svc.connect()
+        try await withTimeout(seconds: 20) { try await svc.connect() }
 
         let roots = await resolveRoots(snapshotsPath: c.remotePath,
                                        pointerName: pointerName(c.latestPointerName),

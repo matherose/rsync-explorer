@@ -9,6 +9,7 @@ enum SFTPError: Error { case notConnected, missingSize }
 /// instead of an opaque handshake failure.
 enum SFTPConnectError: Error, Equatable {
     case hostKeyMismatch
+    case timedOut
 
     var userMessage: String {
         switch self {
@@ -16,6 +17,9 @@ enum SFTPConnectError: Error, Equatable {
             return "The NAS host key has changed since you last connected.\n\n" +
                    "If you reinstalled or reset the NAS, tap “Forget saved connection” and reconnect to trust the new key. " +
                    "Otherwise this could indicate a security problem on your network."
+        case .timedOut:
+            return "Couldn’t reach the NAS — the connection timed out.\n\n" +
+                   "Check the address and port, that your device is on the same network, and that the NAS is powered on."
         }
     }
 }
