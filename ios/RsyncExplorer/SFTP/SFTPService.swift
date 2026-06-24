@@ -1,6 +1,6 @@
 import Foundation
 
-protocol SFTPService {
+protocol SFTPService: Sendable {
     func connect() async throws
     func listDirectory(_ path: String) async throws -> [RemoteEntry]
     func resolveLatestSnapshot(under path: String) async throws -> String

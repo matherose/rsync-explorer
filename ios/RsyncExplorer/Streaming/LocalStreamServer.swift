@@ -27,24 +27,50 @@ actor LocalStreamServer {
     private let registry = StreamRegistry()
     private var group: MultiThreadedEventLoopGroup?
     private var channel: Channel?
+    private var startTask: Task<(Channel, MultiThreadedEventLoopGroup), Error>?
 
     init(service: SFTPService) { self.service = service }
 
+    /// Single-flight start: concurrent callers (e.g. many video thumbnails for one
+    /// folder) await the same bind instead of each spinning up its own event-loop
+    /// group and binding a second server. The bind happens off-actor in `task`;
+    /// the actor assigns the result (idempotently for creator and followers).
     private func startIfNeeded() async throws {
-        guard channel == nil else { return }
-        let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
-        let service = self.service
-        let registry = self.registry
-        let bootstrap = ServerBootstrap(group: group)
-            .serverChannelOption(ChannelOptions.backlog, value: 16)
-            .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
-            .childChannelInitializer { channel in
-                channel.pipeline.configureHTTPServerPipeline().flatMap {
-                    channel.pipeline.addHandler(StreamHTTPHandler(service: service, registry: registry))
+        if channel != nil { return }
+        let task: Task<(Channel, MultiThreadedEventLoopGroup), Error>
+        if let startTask {
+            task = startTask
+        } else {
+            let service = self.service
+            let registry = self.registry
+            task = Task {
+                let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+                let bootstrap = ServerBootstrap(group: group)
+                    .serverChannelOption(ChannelOptions.backlog, value: 16)
+                    .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                    .childChannelInitializer { channel in
+                        channel.pipeline.configureHTTPServerPipeline().flatMap {
+                            channel.pipeline.addHandler(StreamHTTPHandler(service: service, registry: registry))
+                        }
+                    }
+                do {
+                    let channel = try await bootstrap.bind(host: "127.0.0.1", port: 0).get()
+                    return (channel, group)
+                } catch {
+                    try? await group.shutdownGracefully()
+                    throw error
                 }
             }
-        self.channel = try await bootstrap.bind(host: "127.0.0.1", port: 0).get()
-        self.group = group
+            startTask = task
+        }
+        do {
+            let (ch, grp) = try await task.value
+            self.channel = ch
+            self.group = grp
+        } catch {
+            startTask = nil   // allow a later retry after a failed bind
+            throw error
+        }
     }
 
     func streamURL(path: String, size: Int64) async throws -> URL {
@@ -59,6 +85,7 @@ actor LocalStreamServer {
         try? await group?.shutdownGracefully()
         channel = nil
         group = nil
+        startTask = nil
     }
 }
 

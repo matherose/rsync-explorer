@@ -30,10 +30,10 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
     func stop() { player.stop() }
 
     // MARK: VLCMediaPlayerDelegate
-    func mediaPlayerStateChanged(_ aNotification: Notification!) {
+    func mediaPlayerStateChanged(_ aNotification: Notification) {
         DispatchQueue.main.async { self.isPlaying = self.player.isPlaying }
     }
-    func mediaPlayerTimeChanged(_ aNotification: Notification!) {
+    func mediaPlayerTimeChanged(_ aNotification: Notification) {
         DispatchQueue.main.async {
             if !self.isSeeking {
                 self.position = Double(self.player.position)

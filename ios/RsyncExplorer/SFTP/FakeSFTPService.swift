@@ -1,6 +1,7 @@
 import Foundation
 
-final class FakeSFTPService: SFTPService {
+// Immutable after init (only a `let` tree of value types), so safe to share.
+final class FakeSFTPService: SFTPService, @unchecked Sendable {
     private let tree: [String: [RemoteEntry]]
     init(tree: [String: [RemoteEntry]]) { self.tree = tree }
 

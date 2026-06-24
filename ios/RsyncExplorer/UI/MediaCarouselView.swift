@@ -53,7 +53,7 @@ private struct MediaPageView: View {
     var body: some View {
         switch entry.kind {
         case .image:
-            ZoomableImageView(service: service, entry: entry)
+            ZoomableImageView(service: service, entry: entry, isActive: isActive)
         case .video, .audio:
             CarouselPlayerView(entry: entry, isActive: isActive, service: service, streamServer: streamServer)
         default:
@@ -65,6 +65,7 @@ private struct MediaPageView: View {
 struct ZoomableImageView: View {
     let service: SFTPService
     let entry: RemoteEntry
+    var isActive: Bool = true
     @State private var image: UIImage?
     @State private var failed = false
     @State private var scale: CGFloat = 1
@@ -94,13 +95,20 @@ struct ZoomableImageView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .task { await load() }
+        // Load only once this page is the active one, so a folder of large photos
+        // doesn't decode every image at once. Stays loaded after first activation.
+        .task(id: isActive) { if isActive { await load() } }
     }
 
     private func load() async {
+        guard image == nil else { return }
         do {
             let url = try await FileCache.shared.fetch(entry, via: service) { _ in }
-            if let img = UIImage(contentsOfFile: url.path) { image = img } else { failed = true }
+            // Cap decode size so huge photos don't blow up memory, with headroom for zoom.
+            let decoded = await Task.detached(priority: .userInitiated) {
+                ImageDownsampler.downsample(fileURL: url, maxPixel: 2800)
+            }.value
+            if let decoded { image = decoded } else { failed = true }
         } catch {
             failed = true
         }

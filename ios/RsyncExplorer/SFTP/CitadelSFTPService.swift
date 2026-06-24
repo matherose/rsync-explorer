@@ -147,8 +147,11 @@ actor CitadelSFTPService: SFTPService {
         return sftp
     }
 
-    /// Runs one SFTP operation under the serialization lock. If it fails (e.g. the
-    /// channel dropped), re-opens the connection once and retries a single time.
+    /// Runs one SFTP operation under the serialization lock. If it fails with a
+    /// connection-class error, re-opens the connection once and retries a single
+    /// time. Benign errors (e.g. a missing file) are rethrown WITHOUT reconnecting
+    /// — otherwise a missing `.lrc` or a snapshot folder lacking a subpath would
+    /// needlessly tear down the live channel (and any in-flight playback stream).
     private func withReconnect<T>(_ body: (SFTPClient) async throws -> T) async throws -> T {
         await lock.acquire()
         defer { Task { await lock.release() } }
@@ -156,10 +159,28 @@ actor CitadelSFTPService: SFTPService {
             let sftp = try await ensureConnected()
             return try await body(sftp)
         } catch {
+            guard Self.isConnectionError(error) else { throw error }
             try await connectClient()
             let sftp = try await ensureConnected()
             return try await body(sftp)
         }
+    }
+
+    /// Whether an error means the channel is gone (reconnect) vs. the server simply
+    /// answered with a non-OK status like "no such file" (channel healthy, rethrow).
+    private static func isConnectionError(_ error: Error) -> Bool {
+        // NB: `Citadel.SFTPError` is qualified because this file also declares its
+        // own `SFTPError` (notConnected/missingSize), which would otherwise shadow it.
+        if let sftp = error as? Citadel.SFTPError {
+            switch sftp {
+            case .errorStatus:
+                return false   // server replied (missing file, permission denied, …) — channel is fine
+            default:
+                return true    // connectionClosed / missingResponse / invalidResponse / … — channel suspect
+            }
+        }
+        // Transport/SSH errors (NIO ChannelError, IOError, SSHClientError, …) — treat as a dropped connection.
+        return true
     }
 
     private static func entry(from name: SFTPPathComponent, parent: String) -> RemoteEntry? {
