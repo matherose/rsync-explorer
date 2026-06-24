@@ -5,6 +5,21 @@ import NIOCore
 
 enum SFTPError: Error { case notConnected, missingSize }
 
+/// Surfaced to the UI so a changed/untrusted NAS host key gets a clear message
+/// instead of an opaque handshake failure.
+enum SFTPConnectError: Error, Equatable {
+    case hostKeyMismatch
+
+    var userMessage: String {
+        switch self {
+        case .hostKeyMismatch:
+            return "The NAS host key has changed since you last connected.\n\n" +
+                   "If you reinstalled or reset the NAS, tap “Forget saved connection” and reconnect to trust the new key. " +
+                   "Otherwise this could indicate a security problem on your network."
+        }
+    }
+}
+
 /// Real SFTP service backed by Citadel (SwiftNIO SSH). Read-only.
 ///
 /// Citadel multiplexes every request over a single SSH channel. Swift `actor`
@@ -26,6 +41,7 @@ actor CitadelSFTPService: SFTPService {
     private var sftp: SFTPClient?
     /// Serializes access to the single SFTP channel (see type doc).
     private let lock = AsyncSemaphore(value: 1)
+    private let hostKeyStore = HostKeyStore()
 
     init(config: ServerConfig, auth: SFTPAuth) {
         self.config = config
@@ -127,14 +143,25 @@ actor CitadelSFTPService: SFTPService {
         case .ed25519(let key):
             method = .ed25519(username: config.username, privateKey: key)
         }
-        // TODO(Phase E): replace .acceptAnything() with TOFU host-key pinning.
-        let client = try await SSHClient.connect(
-            host: config.host,
-            port: config.port,
-            authenticationMethod: method,
-            hostKeyValidator: .acceptAnything(),
-            reconnect: .never
-        )
+        // Trust-on-first-use host-key pinning: pin the key on the first connection,
+        // then require it to match on every later connection.
+        let outcome = HostKeyOutcome()
+        let validator = SSHHostKeyValidator.custom(
+            TOFUHostKeyValidator(host: config.host, port: config.port,
+                                 store: hostKeyStore, outcome: outcome))
+        let client: SSHClient
+        do {
+            client = try await SSHClient.connect(
+                host: config.host,
+                port: config.port,
+                authenticationMethod: method,
+                hostKeyValidator: validator,
+                reconnect: .never
+            )
+        } catch {
+            if outcome.mismatch { throw SFTPConnectError.hostKeyMismatch }
+            throw error
+        }
         self.client = client
         self.sftp = try await client.openSFTP()
     }

@@ -17,6 +17,7 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
     func attach(url: URL, to view: UIView, fetchMetadata: Bool = false) {
         guard !started else { return }
         started = true
+        AudioSession.activatePlayback()   // play through the silent switch + allow background audio
         let media = VLCMedia(url: url)
         if fetchMetadata { media.delegate = self }   // playback parses -> metadata + artwork
         player.drawable = view

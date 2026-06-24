@@ -68,7 +68,7 @@ struct ConnectionView: View {
             ConnectionStore.save(conn, password: password)
             onConnected(session)
         } catch {
-            self.error = "Connection failed:\n\(error)"
+            self.error = (error as? SFTPConnectError)?.userMessage ?? "Connection failed:\n\(error)"
         }
     }
 }

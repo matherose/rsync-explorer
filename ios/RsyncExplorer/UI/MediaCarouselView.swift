@@ -17,9 +17,19 @@ struct MediaCarouselView: View {
             Color.black.ignoresSafeArea()
             TabView(selection: $index) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
-                    MediaPageView(entry: entry, isActive: index == i,
-                                  service: service, streamServer: streamServer)
-                        .tag(i)
+                    // Only materialize the active page and its immediate neighbors, so a
+                    // folder with hundreds of media items doesn't spin up a VLC player per
+                    // page. Off-window pages collapse to a placeholder; leaving the window
+                    // tears the player down (onDisappear) and frees its memory.
+                    Group {
+                        if abs(i - index) <= 1 {
+                            MediaPageView(entry: entry, isActive: index == i,
+                                          service: service, streamServer: streamServer)
+                        } else {
+                            Color.black
+                        }
+                    }
+                    .tag(i)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))

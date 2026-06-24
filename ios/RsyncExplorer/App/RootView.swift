@@ -27,7 +27,8 @@ struct RootView: View {
         do {
             session = try await Connector.connect(saved.connection, password: saved.password)
         } catch {
-            bootError = "Saved connection failed — check the details below."
+            bootError = (error as? SFTPConnectError)?.userMessage
+                ?? "Saved connection failed — check the details below."
         }
     }
 }

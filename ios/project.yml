@@ -19,6 +19,12 @@ packages:
     # NIOHTTP1 for the local streaming bridge.
     url: https://github.com/apple/swift-nio.git
     from: 2.50.0
+  NIOSSH:
+    # Same fork URL + range Citadel 0.12.1 already resolves, so SPM reuses the
+    # identical package (no duplicate-identity conflict). Needed to implement
+    # trust-on-first-use host-key pinning via SSHHostKeyValidator.custom(...).
+    url: https://github.com/Wellz26/swift-nio-ssh.git
+    from: 0.3.4
 targets:
   RsyncExplorer:
     type: application
@@ -34,6 +40,8 @@ targets:
         product: NIOPosix
       - package: SwiftNIO
         product: NIOHTTP1
+      - package: NIOSSH
+        product: NIOSSH
     info:
       path: RsyncExplorer/Info.plist
       properties:
@@ -41,6 +49,8 @@ targets:
         NSLocalNetworkUsageDescription: RsyncFS connects to your NAS on your local network over SFTP.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        UIBackgroundModes:
+          - audio
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

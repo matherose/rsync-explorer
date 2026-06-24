@@ -32,5 +32,6 @@ enum ConnectionStore {
     static func clear() {
         UserDefaults.standard.removeObject(forKey: defaultsKey)
         store.delete(account: pwAccount)
+        HostKeyStore().clearAll()   // re-trust the host key on the next connection
     }
 }
