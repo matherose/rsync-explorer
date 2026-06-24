@@ -115,7 +115,41 @@ struct CarouselPlayerView: View {
             }
             .tint(.white)
             Text(timeString(model.lengthMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
+            if !isAudio && model.hasSelectableTracks {
+                tracksMenu
+            }
         }
+    }
+
+    /// Audio- and subtitle-track picker for video (VLC populates the lists once the
+    /// streams are open). The subtitle list already includes a "Disable" entry.
+    private var tracksMenu: some View {
+        Menu {
+            if model.audioTracks.count > 1 {
+                Section("Audio") {
+                    ForEach(model.audioTracks) { track in
+                        Button { model.selectAudioTrack(track.id); scheduleHide() } label: {
+                            trackLabel(track.name, selected: track.id == model.currentAudioTrackID)
+                        }
+                    }
+                }
+            }
+            if model.subtitleTracks.count > 1 {
+                Section("Subtitles") {
+                    ForEach(model.subtitleTracks) { track in
+                        Button { model.selectSubtitleTrack(track.id); scheduleHide() } label: {
+                            trackLabel(track.name, selected: track.id == model.currentSubtitleTrackID)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "captions.bubble").font(.title3).foregroundStyle(.white).frame(width: 30)
+        }
+    }
+
+    @ViewBuilder private func trackLabel(_ name: String, selected: Bool) -> some View {
+        if selected { Label(name, systemImage: "checkmark") } else { Text(name) }
     }
 
     private var positionBinding: Binding<Double> {
