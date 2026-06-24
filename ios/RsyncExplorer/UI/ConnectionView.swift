@@ -10,6 +10,7 @@ struct ConnectionView: View {
     @State private var username: String
     @State private var password: String
     @State private var remotePath: String
+    @State private var pointerName: String
     @State private var busy = false
     @State private var error: String
 
@@ -24,6 +25,7 @@ struct ConnectionView: View {
         _username = State(initialValue: initial?.connection.username ?? "")
         _password = State(initialValue: initial?.password ?? "")
         _remotePath = State(initialValue: initial?.connection.remotePath ?? "")
+        _pointerName = State(initialValue: initial?.connection.latestPointerName ?? "")
         _error = State(initialValue: initialError ?? "")
     }
 
@@ -37,8 +39,16 @@ struct ConnectionView: View {
                     TextField("Username", text: $username)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
                     SecureField("Password", text: $password)
-                    TextField("Backup folder holding the snapshots, e.g. /mnt/nas/BACK_EXT", text: $remotePath)
+                }
+                Section {
+                    TextField("Path to all snapshots, e.g. /mnt/nas/BACK_EXT", text: $remotePath)
                         .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    TextField("Latest-snapshot pointer (default: latest)", text: $pointerName)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                } header: {
+                    Text("Snapshots")
+                } footer: {
+                    Text("The symlink in that folder pointing to the newest snapshot. Leave blank to use “latest”.")
                 }
                 if !error.isEmpty {
                     Section { Text(error).foregroundStyle(.red).font(.callout).textSelection(.enabled) }
@@ -49,7 +59,8 @@ struct ConnectionView: View {
                     Section {
                         Button("Forget saved connection", role: .destructive) {
                             ConnectionStore.clear()
-                            host = ""; port = "22"; username = ""; password = ""; remotePath = ""; error = ""
+                            host = ""; port = "22"; username = ""; password = ""
+                            remotePath = ""; pointerName = ""; error = ""
                         }
                     }
                 }
@@ -61,8 +72,10 @@ struct ConnectionView: View {
     private func connect() async {
         busy = true; error = ""
         defer { busy = false }
+        let trimmedPointer = pointerName.trimmingCharacters(in: .whitespaces)
         let conn = SavedConnection(host: host, port: Int(port) ?? 22,
-                                   username: username, remotePath: remotePath)
+                                   username: username, remotePath: remotePath,
+                                   latestPointerName: trimmedPointer.isEmpty ? nil : trimmedPointer)
         do {
             let session = try await Connector.connect(conn, password: password)
             ConnectionStore.save(conn, password: password)

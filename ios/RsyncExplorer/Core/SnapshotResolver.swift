@@ -46,6 +46,11 @@ enum SnapshotResolver {
         return Context(latestRoot: latestRoot, previousRoot: previousRoot)
     }
 
+    /// Joins a directory and a child name with a single separator.
+    static func join(_ base: String, _ name: String) -> String {
+        base.hasSuffix("/") ? base + name : base + "/" + name
+    }
+
     /// The parent directory of a path. "/a/b/c" -> "/a/b", "/foo" -> "/", "/" -> "/".
     static func parentPath(_ path: String) -> String {
         let p = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path

@@ -4,7 +4,8 @@ struct SavedConnection: Codable, Equatable {
     var host: String
     var port: Int
     var username: String
-    var remotePath: String
+    var remotePath: String                 // directory containing all the snapshots
+    var latestPointerName: String? = nil   // symlink to the newest snapshot (default "latest")
 }
 
 /// Persists the connection: non-secret fields in UserDefaults, password in the Keychain.
