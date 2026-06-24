@@ -48,7 +48,7 @@ struct CarouselPlayerView: View {
                 model.addSubtitle(sub)
             }
         }
-        .onDisappear { model.stop(); hideTask?.cancel() }
+        .onDisappear { model.stopNowPlaying(); model.stop(); hideTask?.cancel() }
     }
 
     // MARK: Audio layout
@@ -173,9 +173,11 @@ struct CarouselPlayerView: View {
             } else {
                 model.player.play()
             }
+            model.startNowPlaying(title: displayName)   // own the lock screen / Control Center
             scheduleHide()
         } else {
             model.player.pause()
+            model.stopNowPlaying()                       // yield it to whatever page is now active
         }
     }
 

@@ -23,6 +23,7 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
     @Published var currentSubtitleTrackID: Int = -1
     var isSeeking = false
     private var started = false
+    private var nowPlayingTitle = ""
 
     /// True once there's more than one audio track or any selectable subtitle.
     var hasSelectableTracks: Bool { audioTracks.count > 1 || subtitleTracks.count > 1 }
@@ -42,6 +43,20 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
     func playPause() { player.isPlaying ? player.pause() : player.play() }
     func seek(fraction: Double) { player.position = Float(max(0, min(1, fraction))) }
     func stop() { player.stop() }
+
+    /// Becomes the lock-screen / Control-Center "Now Playing" item.
+    func startNowPlaying(title: String) {
+        nowPlayingTitle = title
+        NowPlayingCenter.shared.setActive(self)
+        pushNowPlaying()
+    }
+    func stopNowPlaying() { NowPlayingCenter.shared.clear(if: self) }
+
+    private func pushNowPlaying() {
+        NowPlayingCenter.shared.update(from: self, title: nowPlayingTitle, artist: artist,
+                                       artwork: artwork, durationMs: lengthMs,
+                                       elapsedMs: timeMs, isPlaying: isPlaying)
+    }
 
     func selectAudioTrack(_ id: Int) {
         player.currentAudioTrackIndex = Int32(id)
@@ -78,6 +93,7 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
         DispatchQueue.main.async {
             self.isPlaying = self.player.isPlaying
             self.refreshTracks()
+            self.pushNowPlaying()
         }
     }
     func mediaPlayerTimeChanged(_ aNotification: Notification) {
@@ -89,6 +105,7 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
             let len = Int(self.player.media?.length.intValue ?? 0)
             if len > 0 { self.lengthMs = len }
             else if self.position > 0.01 { self.lengthMs = Int(Double(self.timeMs) / self.position) }
+            self.pushNowPlaying()
         }
     }
 
