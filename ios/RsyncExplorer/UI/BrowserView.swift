@@ -25,6 +25,7 @@ struct BrowserView: View {
     @State private var downloadMessage: String?
     @State private var showSettings = false
     @State private var streamServer: LocalStreamServer
+    @State private var cache = DirectoryCache()
 
     init(session: BrowserSession, onDisconnect: @escaping () -> Void) {
         self.session = session
@@ -40,11 +41,11 @@ struct BrowserView: View {
         NavigationStack {
             DirectoryView(relPath: "", title: "All snapshots (\(session.snapshotRoots.count))",
                           service: session.service, snapshotRoots: session.snapshotRoots,
-                          thumbnails: thumbnails, media: $media, onDownload: download)
+                          thumbnails: thumbnails, cache: cache, media: $media, onDownload: download)
                 .navigationDestination(for: DirRoute.self) { route in
                     DirectoryView(relPath: route.relPath, title: route.title,
                                   service: session.service, snapshotRoots: session.snapshotRoots,
-                                  thumbnails: thumbnails, media: $media, onDownload: download)
+                                  thumbnails: thumbnails, cache: cache, media: $media, onDownload: download)
                 }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {

@@ -18,18 +18,21 @@ struct DirectoryView: View {
     let service: SFTPService
     let snapshotRoots: [String]
     let thumbnails: ThumbnailService
+    let cache: DirectoryCache
     @Binding var media: MediaPresentation?
     let onDownload: (RemoteEntry) -> Void
 
     @State private var allItems: [SnapshotMerge.Item] = []
     @State private var loading = true
-    @State private var error: String?
+    @State private var loadFailed = false
 
-    @State private var sortKey: SortKey = .name
-    @State private var ascending = true
+    // View preferences persist across folders and launches (the type filter stays
+    // per-session on purpose — a remembered hidden filter is a "where are my files?" trap).
+    @AppStorage("dir.sortKey") private var sortKey: SortKey = .name
+    @AppStorage("dir.ascending") private var ascending = true
+    @AppStorage("dir.gridMode") private var gridMode = false
     @State private var enabledKinds: Set<FileKind> = [.image, .video, .audio, .other]
     @State private var searchText = ""
-    @State private var gridMode = false
     @State private var infoItem: SnapshotMerge.Item?
     @State private var searchResults: [SearchHit]?
     @State private var searching = false
@@ -64,7 +67,7 @@ struct DirectoryView: View {
             else if gridMode { gridContent }
             else { listContent }
         }
-        .overlay { if (loading && allItems.isEmpty) || searching { ProgressView() } }
+        .overlay { statusOverlay }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search — press return for subfolders")
@@ -84,12 +87,27 @@ struct DirectoryView: View {
             }
         }
         .task { await load() }
-        .sheet(item: $infoItem) { FileInfoView(item: $0) }
+        .sheet(item: $infoItem) { FileInfoView(item: $0, snapshotRoots: snapshotRoots) }
+    }
+
+    @ViewBuilder private var statusOverlay: some View {
+        if searching || (loading && allItems.isEmpty) {
+            ProgressView()
+        } else if loadFailed && allItems.isEmpty {
+            ContentUnavailableView {
+                Label("Couldn’t load this folder", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text("The connection may have dropped.")
+            } actions: {
+                Button("Retry") { Task { await load(forceRefresh: true) } }
+            }
+        } else if allItems.isEmpty && searchResults == nil {
+            ContentUnavailableView("Empty folder", systemImage: "folder")
+        }
     }
 
     private var listContent: some View {
         List {
-            if let error { Text(error).foregroundStyle(.red) }
             ForEach(displayedItems) { item in
                 if item.entry.isDirectory {
                     NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
@@ -106,7 +124,7 @@ struct DirectoryView: View {
             }
         }
         .listStyle(.plain)
-        .refreshable { await load() }
+        .refreshable { await load(forceRefresh: true) }
     }
 
     private var gridContent: some View {
@@ -130,7 +148,7 @@ struct DirectoryView: View {
             }
             .padding(8)
         }
-        .refreshable { await load() }
+        .refreshable { await load(forceRefresh: true) }
     }
 
     @ViewBuilder private func fileMenu(_ item: SnapshotMerge.Item) -> some View {
@@ -242,16 +260,34 @@ struct DirectoryView: View {
         }
     }
 
-    private func load() async {
+    private func load(forceRefresh: Bool = false) async {
+        if !forceRefresh, let cached = cache.items(for: relPath) {
+            allItems = cached
+            loadFailed = false
+            loading = false
+            return
+        }
         loading = true
         defer { loading = false }
+
         var listings: [[RemoteEntry]] = []
+        var anySucceeded = false
         for root in snapshotRoots {
             let folder = relPath.isEmpty ? root : root + "/" + relPath
-            let entries = (try? await service.listDirectory(folder)) ?? []
-            listings.append(entries)
+            // A folder may legitimately be absent from older snapshots, so tolerate
+            // per-root failures; only a total failure means the connection dropped.
+            if let entries = try? await service.listDirectory(folder) {
+                listings.append(entries)
+                anySucceeded = true
+            } else {
+                listings.append([])
+            }
         }
-        allItems = SnapshotMerge.merge(listings)
-        error = (allItems.isEmpty && !snapshotRoots.isEmpty) ? "Empty folder." : nil
+
+        guard anySucceeded else { loadFailed = true; return }   // don't cache a failure
+        loadFailed = false
+        let merged = SnapshotMerge.merge(listings)
+        allItems = merged
+        cache.set(merged, for: relPath)
     }
 }

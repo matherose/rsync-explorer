@@ -51,6 +51,13 @@ enum SnapshotResolver {
         base.hasSuffix("/") ? base + name : base + "/" + name
     }
 
+    /// The snapshot a path belongs to: the last component of the matching root
+    /// (e.g. "2026-06-12_02-00" or "latest"). nil if the path is under no root.
+    static func snapshotName(forPath path: String, roots: [String]) -> String? {
+        guard let root = roots.first(where: { path == $0 || path.hasPrefix($0 + "/") }) else { return nil }
+        return (root as NSString).lastPathComponent
+    }
+
     /// The parent directory of a path. "/a/b/c" -> "/a/b", "/foo" -> "/", "/" -> "/".
     static func parentPath(_ path: String) -> String {
         let p = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
