@@ -62,6 +62,16 @@ final class RemoteSearchCommandTests: XCTestCase {
         XCTAssertTrue(cmd.contains("'*song*'"))
     }
 
+    func test_command_appends_head_limit_when_set() {
+        let unbounded = RemoteSearchCommand.command(tool: .find, term: "x", roots: ["/b"])
+        XCTAssertFalse(unbounded.contains("head"))
+        let bounded = RemoteSearchCommand.command(tool: .find, term: "x", roots: ["/b"], limit: 5000)
+        XCTAssertTrue(bounded.hasSuffix("| head -n 5000"))
+        // fd backend gets the cap too, after its own args.
+        let fd = RemoteSearchCommand.command(tool: .fdfind, term: "x", roots: ["/b"], limit: 10)
+        XCTAssertTrue(fd.hasSuffix("| head -n 10"))
+    }
+
     func test_command_injection_term_is_fully_quoted() {
         let evil = "a'; rm -rf / #"
         let cmd = RemoteSearchCommand.command(tool: .find, term: evil, roots: ["/b"])

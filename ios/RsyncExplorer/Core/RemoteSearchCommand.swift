@@ -41,23 +41,28 @@ enum RemoteSearchCommand {
     /// Builds the remote search command for `tool` searching `roots` for `term`.
     /// The term and roots are shell-quoted, so arbitrary user input is safe to
     /// interpolate. May over-match by design; pair with ``parseResults(_:term:roots:)``.
-    static func command(tool: RemoteSearchTool, term: String, roots: [String]) -> String {
+    /// When `limit` is set, the output is capped server-side with `head` so a broad
+    /// query can't stream back unbounded bytes (the early pipe close stops the tool).
+    static func command(tool: RemoteSearchTool, term: String, roots: [String], limit: Int? = nil) -> String {
         let quotedTerm = shellQuote(term)
         let quotedRoots = roots.map(shellQuote).joined(separator: " ")
+        let base: String
         switch tool {
         case .fd, .fdfind:
             // --fixed-strings: literal (no regex) substring; --ignore-case: parity with -iname;
             // --hidden/--no-ignore: a backup tree must include dotfiles and ignore .gitignore;
             // --absolute-path: emit absolute paths; `--` ends options so a leading-`-` term is safe.
-            return "\(tool.rawValue) --hidden --no-ignore --ignore-case --fixed-strings"
+            base = "\(tool.rawValue) --hidden --no-ignore --ignore-case --fixed-strings"
                 + " --absolute-path -- \(quotedTerm) \(quotedRoots)"
         case .plocate:
             // plocate has no path-restriction flag, so roots are enforced in parseResults.
-            return "plocate --ignore-case -- \(shellQuote("*\(term)*"))"
+            base = "plocate --ignore-case -- \(shellQuote("*\(term)*"))"
         case .find:
             // 2>/dev/null drops permission-denied noise; -iname is a basename glob.
-            return "find \(quotedRoots) -iname \(shellQuote("*\(term)*")) 2>/dev/null"
+            base = "find \(quotedRoots) -iname \(shellQuote("*\(term)*")) 2>/dev/null"
         }
+        guard let limit else { return base }
+        return base + " | head -n \(limit)"
     }
 
     /// Filters raw stdout to absolute paths whose **basename** contains `term`

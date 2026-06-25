@@ -131,6 +131,18 @@ actor CitadelSFTPService: SFTPService {
         }
     }
 
+    /// Runs `command` on the server via a dedicated SSH exec channel (separate from
+    /// the multiplexed SFTP channel) and returns its stdout. Serialized under the
+    /// same lock so it can't race a reconnect; stderr is dropped (mergeStreams:
+    /// false) and the response is capped so a runaway command can't exhaust memory.
+    func runCommand(_ command: String) async throws -> String {
+        try await withReconnectClient { client in
+            let buffer = try await client.executeCommand(
+                command, maxResponseSize: 8 * 1024 * 1024, mergeStreams: false)
+            return String(buffer: buffer)
+        }
+    }
+
     // MARK: - Connection management
 
     /// Opens (or re-opens) the SSH + SFTP channel. Assumes `lock` is held.
@@ -178,6 +190,14 @@ actor CitadelSFTPService: SFTPService {
         return sftp
     }
 
+    /// Returns a live SSH client, opening one if needed. Assumes `lock` is held.
+    private func ensureClient() async throws -> SSHClient {
+        if let client { return client }
+        try await connectClient()
+        guard let client else { throw SFTPError.notConnected }
+        return client
+    }
+
     /// Runs one SFTP operation under the serialization lock. If it fails with a
     /// connection-class error, re-opens the connection once and retries a single
     /// time. Benign errors (e.g. a missing file) are rethrown WITHOUT reconnecting
@@ -194,6 +214,22 @@ actor CitadelSFTPService: SFTPService {
             try await connectClient()
             let sftp = try await ensureConnected()
             return try await body(sftp)
+        }
+    }
+
+    /// Like `withReconnect` but hands the SSH client (for exec channels) instead of
+    /// the SFTP client. Same serialization + single-retry-on-drop policy.
+    private func withReconnectClient<T>(_ body: (SSHClient) async throws -> T) async throws -> T {
+        await lock.acquire()
+        defer { Task { await lock.release() } }
+        do {
+            let client = try await ensureClient()
+            return try await body(client)
+        } catch {
+            guard Self.isConnectionError(error) else { throw error }
+            try await connectClient()
+            let client = try await ensureClient()
+            return try await body(client)
         }
     }
 

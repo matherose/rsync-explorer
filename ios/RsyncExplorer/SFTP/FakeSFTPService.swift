@@ -3,7 +3,14 @@ import Foundation
 // Immutable after init (only a `let` tree of value types), so safe to share.
 final class FakeSFTPService: SFTPService, @unchecked Sendable {
     private let tree: [String: [RemoteEntry]]
-    init(tree: [String: [RemoteEntry]]) { self.tree = tree }
+    /// Maps a remote command to canned stdout (default: "", i.e. no search tool
+    /// found, so `RemoteSearch` falls back to the in-app walk).
+    private let commandResponder: @Sendable (String) -> String
+    init(tree: [String: [RemoteEntry]],
+         commandResponder: @escaping @Sendable (String) -> String = { _ in "" }) {
+        self.tree = tree
+        self.commandResponder = commandResponder
+    }
 
     func connect() async throws {}
     func disconnect() async {}
@@ -20,6 +27,7 @@ final class FakeSFTPService: SFTPService, @unchecked Sendable {
         try Data().write(to: localURL)
     }
     func read(at path: String, offset: UInt64, length: UInt32) async throws -> Data { Data() }
+    func runCommand(_ command: String) async throws -> String { commandResponder(command) }
 
     static func sample() -> FakeSFTPService {
         func d(_ n: String, _ p: String, _ ts: TimeInterval) -> RemoteEntry {

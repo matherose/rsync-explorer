@@ -204,8 +204,14 @@ struct DirectoryView: View {
         guard !searchText.isEmpty else { return }
         searching = true
         defer { searching = false }
-        let hits = await RecursiveSearch.run(query: searchText, baseRel: relPath,
+        // Prefer fast server-side search (fd/find on the NAS); fall back to the
+        // in-app snapshot walk if the host has no usable tool or the command fails.
+        var hits = await RemoteSearch.run(query: searchText, baseRel: relPath,
+                                          roots: snapshotRoots, service: service)
+        if hits == nil {
+            hits = await RecursiveSearch.run(query: searchText, baseRel: relPath,
                                              roots: snapshotRoots, service: service)
+        }
         if !Task.isCancelled { searchResults = hits }
     }
 
