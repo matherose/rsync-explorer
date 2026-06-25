@@ -276,21 +276,30 @@ struct DirectoryView: View {
         loading = true
         defer { loading = false }
 
-        var listings: [[RemoteEntry]] = []
-        var anySucceeded = false
-        for root in snapshotRoots {
-            let folder = relPath.isEmpty ? root : root + "/" + relPath
-            // A folder may legitimately be absent from older snapshots, so tolerate
-            // per-root failures; only a total failure means the connection dropped.
-            if let entries = try? await service.listDirectory(folder) {
-                listings.append(entries)
-                anySucceeded = true
-            } else {
-                listings.append([])
+        let listings: [[RemoteEntry]]
+        if let server = await RemoteListing.run(roots: snapshotRoots, rel: relPath, service: service) {
+            // One server-side `find` across all snapshots — one round-trip instead of
+            // one per snapshot root.
+            listings = server
+        } else {
+            // Fallback: list each snapshot root over SFTP. A folder may legitimately be
+            // absent from older snapshots, so tolerate per-root failures; only a total
+            // failure means the connection dropped.
+            var acc: [[RemoteEntry]] = []
+            var anySucceeded = false
+            for root in snapshotRoots {
+                let folder = relPath.isEmpty ? root : root + "/" + relPath
+                if let entries = try? await service.listDirectory(folder) {
+                    acc.append(entries)
+                    anySucceeded = true
+                } else {
+                    acc.append([])
+                }
             }
+            guard anySucceeded else { loadFailed = true; return }   // don't cache a failure
+            listings = acc
         }
 
-        guard anySucceeded else { loadFailed = true; return }   // don't cache a failure
         loadFailed = false
         let merged = SnapshotMerge.merge(listings)
         allItems = merged
