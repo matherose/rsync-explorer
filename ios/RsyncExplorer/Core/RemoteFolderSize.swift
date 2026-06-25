@@ -20,8 +20,14 @@ enum RemoteFolderSize {
         return nil
     }
 
-    static func run(path: String, service: SFTPService) async -> Int64? {
-        guard let out = try? await service.runCommand(command(path: path)) else { return nil }
+    /// Runs `du` on the server with a generous timeout so a giant folder (e.g. a whole
+    /// snapshot root, which must walk the entire tree) can't leave the UI "Calculating…"
+    /// forever. Returns nil on timeout, connection error, or unparseable output.
+    static func run(path: String, service: SFTPService, timeout: TimeInterval = 300) async -> Int64? {
+        let out = try? await withTimeout(seconds: timeout) {
+            try await service.runCommand(command(path: path))
+        }
+        guard let out else { return nil }
         return parse(out)
     }
 }

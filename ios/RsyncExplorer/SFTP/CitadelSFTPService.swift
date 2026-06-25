@@ -165,15 +165,34 @@ actor CitadelSFTPService: SFTPService {
     }
 
     /// Runs `command` on the server via a dedicated SSH exec channel (separate from
-    /// the multiplexed SFTP channel) and returns its stdout. Serialized under the
-    /// same lock so it can't race a reconnect; stderr is dropped (mergeStreams:
-    /// false) and the response is capped so a runaway command can't exhaust memory.
+    /// the multiplexed SFTP channel) and returns its stdout. The lock is held only
+    /// briefly to fetch (or reconnect) the client — the command itself runs OFF the
+    /// lock, so a long one (e.g. `du` on a big folder) doesn't block SFTP listings or
+    /// thumbnail reads on the shared channel. stderr is dropped (mergeStreams: false)
+    /// and the response is capped so a runaway command can't exhaust memory.
     func runCommand(_ command: String) async throws -> String {
-        try await withReconnectClient { client in
-            let buffer = try await client.executeCommand(
-                command, maxResponseSize: 8 * 1024 * 1024, mergeStreams: false)
-            return String(buffer: buffer)
+        let client = try await lockedClient(reconnect: false)
+        do {
+            return try await Self.exec(command, on: client)
+        } catch {
+            guard Self.isConnectionError(error) else { throw error }
+            return try await Self.exec(command, on: lockedClient(reconnect: true))
         }
+    }
+
+    /// Briefly takes the lock to return the live SSH client (optionally reconnecting
+    /// first), then releases it so the caller can use the client off-lock.
+    private func lockedClient(reconnect: Bool) async throws -> SSHClient {
+        await lock.acquire()
+        defer { Task { await lock.release() } }
+        if reconnect { try await connectClient() }
+        return try await ensureClient()
+    }
+
+    private static func exec(_ command: String, on client: SSHClient) async throws -> String {
+        let buffer = try await client.executeCommand(
+            command, maxResponseSize: 8 * 1024 * 1024, mergeStreams: false)
+        return String(buffer: buffer)
     }
 
     // MARK: - Connection management
@@ -247,22 +266,6 @@ actor CitadelSFTPService: SFTPService {
             try await connectClient()
             let sftp = try await ensureConnected()
             return try await body(sftp)
-        }
-    }
-
-    /// Like `withReconnect` but hands the SSH client (for exec channels) instead of
-    /// the SFTP client. Same serialization + single-retry-on-drop policy.
-    private func withReconnectClient<T>(_ body: (SSHClient) async throws -> T) async throws -> T {
-        await lock.acquire()
-        defer { Task { await lock.release() } }
-        do {
-            let client = try await ensureClient()
-            return try await body(client)
-        } catch {
-            guard Self.isConnectionError(error) else { throw error }
-            try await connectClient()
-            let client = try await ensureClient()
-            return try await body(client)
         }
     }
 
