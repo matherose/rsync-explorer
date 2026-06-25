@@ -9,6 +9,9 @@ protocol SFTPService: Sendable {
     func download(_ path: String, to localURL: URL,
                   progress: @escaping (Double) -> Void) async throws
     func read(at path: String, offset: UInt64, length: UInt32) async throws -> Data
+    /// Reads up to `maxBytes` from the start of a file (for header/thumbnail
+    /// extraction). Default loops `read`; the real service opens the file once.
+    func readHeader(_ path: String, maxBytes: Int) async throws -> Data
     /// Runs a shell command on the server and returns its stdout. Used for
     /// server-side search; conformers that can't exec inherit the throwing default.
     func runCommand(_ command: String) async throws -> String
@@ -26,5 +29,11 @@ extension SFTPService {
     /// silently falls back to the in-app walk when it throws.
     func runCommand(_ command: String) async throws -> String {
         throw SFTPServiceError.commandsUnsupported
+    }
+
+    /// Default header read: a single `read` from offset 0 (real services override to
+    /// open once and accumulate, tolerating short reads).
+    func readHeader(_ path: String, maxBytes: Int) async throws -> Data {
+        try await read(at: path, offset: 0, length: UInt32(maxBytes))
     }
 }

@@ -125,9 +125,42 @@ actor CitadelSFTPService: SFTPService {
     func read(at path: String, offset: UInt64, length: UInt32) async throws -> Data {
         try await withReconnect { sftp in
             let file = try await sftp.openFile(filePath: path, flags: .read)
-            defer { Task { try? await file.close() } }
-            let buf = try await file.read(from: offset, length: length)
-            return Data(buf.readableBytesView)
+            do {
+                let buf = try await file.read(from: offset, length: length)
+                let data = Data(buf.readableBytesView)
+                try? await file.close()   // close INSIDE the lock — a detached close races the next op on the shared channel
+                return data
+            } catch {
+                try? await file.close()
+                throw error
+            }
+        }
+    }
+
+    /// Reads up to `maxBytes` from the start of a file in a single locked operation
+    /// (one open, chunked reads, one close) — for header/thumbnail extraction without
+    /// the per-chunk reopen + lock churn that starves directory listings.
+    func readHeader(_ path: String, maxBytes: Int) async throws -> Data {
+        try await withReconnect { sftp in
+            let file = try await sftp.openFile(filePath: path, flags: .read)
+            do {
+                var data = Data()
+                var offset: UInt64 = 0
+                let chunk = 64 * 1024
+                while data.count < maxBytes {
+                    let want = UInt32(min(chunk, maxBytes - data.count))
+                    let bytes = Data(try await file.read(from: offset, length: want).readableBytesView)
+                    if bytes.isEmpty { break }
+                    data.append(bytes)
+                    offset += UInt64(bytes.count)
+                    if bytes.count < Int(want) { break }   // short read → EOF or server cap
+                }
+                try? await file.close()
+                return data
+            } catch {
+                try? await file.close()
+                throw error
+            }
         }
     }
 

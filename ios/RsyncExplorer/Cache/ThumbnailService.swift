@@ -22,15 +22,16 @@ struct ThumbnailService {
         return img
     }
 
-    private static let headerBytes = 256 * 1024   // enough for a typical EXIF/preview thumbnail
+    private static let headerBytes = 128 * 1024   // covers the 64KB-max EXIF APP1 + margin
 
     private func imageThumb(_ e: RemoteEntry) async -> UIImage? {
-        // Fast path: for files bigger than the header window, pull just the header and
-        // use the embedded EXIF/preview thumbnail — avoids downloading a multi-MB photo
-        // to make a 200px thumb. (Small files fall straight through to the cached full
-        // download, which is just as cheap and keeps the file warm for opening.)
+        // Fast path: for files bigger than the header window, pull just the header in
+        // one SFTP operation and use the embedded EXIF/preview thumbnail — avoids
+        // downloading a multi-MB photo to make a 200px thumb. (Small files fall through
+        // to the cached full download, which is just as cheap and keeps the file warm.)
         if e.size == 0 || e.size > Int64(Self.headerBytes),
-           let header = await readPrefix(e, maxBytes: Self.headerBytes),
+           let header = try? await service.readHeader(e.path, maxBytes: Self.headerBytes),
+           !header.isEmpty,
            let img = EmbeddedThumbnail.extract(from: header, maxPixel: 200) {
             return img
         }
@@ -44,23 +45,6 @@ struct ThumbnailService {
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
         return UIImage(cgImage: cg)
-    }
-
-    /// Reads up to `maxBytes` from the start of the file, tolerating short SFTP reads
-    /// (a single SFTP READ may return less than requested).
-    private func readPrefix(_ e: RemoteEntry, maxBytes: Int) async -> Data? {
-        var data = Data()
-        var offset: UInt64 = 0
-        let chunk = 64 * 1024
-        while data.count < maxBytes {
-            let want = UInt32(min(chunk, maxBytes - data.count))
-            guard let part = try? await service.read(at: e.path, offset: offset, length: want),
-                  !part.isEmpty else { break }
-            data.append(part)
-            offset += UInt64(part.count)
-            if part.count < Int(want) { break }   // short read → EOF or server cap
-        }
-        return data.isEmpty ? nil : data
     }
 
     private func videoThumb(_ e: RemoteEntry) async -> UIImage? {
