@@ -4,7 +4,7 @@ struct DirectoryGridCell: View {
     let entry: RemoteEntry
     let isDeleted: Bool
     let thumbnails: ThumbnailService
-    var folderSize: Int64? = nil       // computed on demand for directories
+    var folderSize: FolderSize? = nil  // computed on demand for directories
     @State private var thumb: UIImage?
 
     var body: some View {
@@ -34,7 +34,7 @@ struct DirectoryGridCell: View {
                 .lineLimit(1)
                 .foregroundStyle(.primary)
             if let folderSize {
-                Text(ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file))
+                Text(DirectoryRow.sizeText(folderSize))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -49,9 +49,7 @@ struct DirectoryGridCell: View {
     /// One spoken phrase per cell: name, kind, size (when known), and deleted status.
     private var accessibilityLabel: String {
         var parts = [entry.name, kindLabel]
-        if let folderSize {
-            parts.append(ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file))
-        }
+        if let folderSize { parts.append(DirectoryRow.sizeText(folderSize)) }
         if isDeleted { parts.append("deleted") }
         return parts.joined(separator: ", ")
     }

@@ -4,7 +4,7 @@ struct DirectoryRow: View {
     let entry: RemoteEntry
     let isDeleted: Bool
     let thumbnails: ThumbnailService
-    var folderSize: Int64? = nil       // computed on demand for directories
+    var folderSize: FolderSize? = nil  // computed on demand for directories
     var calculating: Bool = false
 
     @State private var thumb: UIImage?
@@ -37,9 +37,7 @@ struct DirectoryRow: View {
     private var accessibilityLabel: String {
         var parts = [entry.name, kindLabel]
         if entry.isDirectory {
-            if let folderSize {
-                parts.append(ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file))
-            }
+            if let folderSize { parts.append(Self.sizeText(folderSize)) }
         } else {
             parts.append(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
         }
@@ -96,9 +94,17 @@ struct DirectoryRow: View {
             return ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
         }
         if calculating { return "Calculating…" }
-        if let folderSize {
-            return ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file)
+        return folderSize.map(Self.sizeText)
+    }
+
+    /// Complete -> exact size; partial (du couldn't fully read) -> "≥ X", or "—" when
+    /// it couldn't read anything, so a permission-denied folder isn't shown as empty.
+    static func sizeText(_ size: FolderSize) -> String {
+        switch size {
+        case .complete(let n):
+            return ByteCountFormatter.string(fromByteCount: n, countStyle: .file)
+        case .partial(let n):
+            return n > 0 ? "≥ " + ByteCountFormatter.string(fromByteCount: n, countStyle: .file) : "—"
         }
-        return nil
     }
 }

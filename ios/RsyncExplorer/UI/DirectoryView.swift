@@ -54,7 +54,7 @@ struct DirectoryView: View {
     @State private var searchTask: Task<Void, Never>?
     // Folder sizes are computed on demand (recursive `du` on the NAS) and cached here
     // per path — safe to keep for the session since snapshots are immutable.
-    @State private var folderSizes: [String: Int64] = [:]
+    @State private var folderSizes: [String: FolderSize] = [:]
     @State private var calculatingPaths: Set<String> = []
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
@@ -76,9 +76,10 @@ struct DirectoryView: View {
     }
 
     /// The size used for sorting/filtering: a file's own size, or a folder's computed
-    /// size (nil until calculated on demand).
+    /// size (nil until calculated on demand). A partial folder size counts as its
+    /// lower bound.
     private func effectiveSize(_ item: SnapshotMerge.Item) -> Int64? {
-        item.entry.isDirectory ? folderSizes[item.entry.path] : item.entry.size
+        item.entry.isDirectory ? folderSizes[item.entry.path]?.bytes : item.entry.size
     }
 
     private func keyLess(_ a: SnapshotMerge.Item, _ b: SnapshotMerge.Item) -> Bool {

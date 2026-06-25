@@ -3,7 +3,7 @@ import SwiftUI
 struct FileInfoView: View {
     let item: SnapshotMerge.Item
     var snapshotRoots: [String] = []
-    var folderSize: Int64? = nil       // computed on demand for directories
+    var folderSize: FolderSize? = nil  // computed on demand for directories
     @Environment(\.dismiss) private var dismiss
 
     private var snapshotName: String? {
@@ -19,8 +19,7 @@ struct FileInfoView: View {
                     LabeledContent("Size", value: ByteCountFormatter.string(
                         fromByteCount: item.entry.size, countStyle: .file))
                 } else if let folderSize {
-                    LabeledContent("Size", value: ByteCountFormatter.string(
-                        fromByteCount: folderSize, countStyle: .file))
+                    LabeledContent("Size", value: DirectoryRow.sizeText(folderSize))
                 }
                 if let d = item.entry.modificationDate {
                     LabeledContent("Modified", value: d.formatted(date: .abbreviated, time: .shortened))
