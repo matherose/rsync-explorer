@@ -10,6 +10,20 @@ enum SortKey: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum SizeFilter: String, CaseIterable, Identifiable {
+    case none = "Any size", mb1 = "≥ 1 MB", mb10 = "≥ 10 MB", mb100 = "≥ 100 MB", gb1 = "≥ 1 GB"
+    var id: String { rawValue }
+    var minBytes: Int64 {
+        switch self {
+        case .none: return 0
+        case .mb1:  return 1_000_000
+        case .mb10: return 10_000_000
+        case .mb100: return 100_000_000
+        case .gb1:  return 1_000_000_000
+        }
+    }
+}
+
 /// One folder, merged across every snapshot. List or grid; Files-app navigation;
 /// tap media opens the carousel. Sort / type-filter / name-search applied locally.
 struct DirectoryView: View {
@@ -32,11 +46,16 @@ struct DirectoryView: View {
     @AppStorage("dir.ascending") private var ascending = true
     @AppStorage("dir.gridMode") private var gridMode = false
     @State private var enabledKinds: Set<FileKind> = [.image, .video, .audio, .other]
+    @State private var minSize: SizeFilter = .none
     @State private var searchText = ""
     @State private var infoItem: SnapshotMerge.Item?
     @State private var searchResults: [SearchHit]?
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
+    // Folder sizes are computed on demand (recursive `du` on the NAS) and cached here
+    // per path — safe to keep for the session since snapshots are immutable.
+    @State private var folderSizes: [String: Int64] = [:]
+    @State private var calculatingPaths: Set<String> = []
 
     private let columns = [GridItem(.adaptive(minimum: 100), spacing: 8)]
 
@@ -45,7 +64,10 @@ struct DirectoryView: View {
             let kindOK = item.entry.isDirectory || enabledKinds.contains(item.entry.kind)
             let searchOK = searchText.isEmpty
                 || item.entry.name.localizedCaseInsensitiveContains(searchText)
-            return kindOK && searchOK
+            // Folders with an un-computed size stay visible so the filter never hides
+            // something you haven't measured yet.
+            let sizeOK = minSize == .none || (effectiveSize(item).map { $0 >= minSize.minBytes } ?? true)
+            return kindOK && searchOK && sizeOK
         }
         return filtered.sorted { a, b in
             if a.entry.isDirectory != b.entry.isDirectory { return a.entry.isDirectory }
@@ -53,11 +75,17 @@ struct DirectoryView: View {
         }
     }
 
+    /// The size used for sorting/filtering: a file's own size, or a folder's computed
+    /// size (nil until calculated on demand).
+    private func effectiveSize(_ item: SnapshotMerge.Item) -> Int64? {
+        item.entry.isDirectory ? folderSizes[item.entry.path] : item.entry.size
+    }
+
     private func keyLess(_ a: SnapshotMerge.Item, _ b: SnapshotMerge.Item) -> Bool {
         switch sortKey {
         case .name: return a.entry.name.localizedCaseInsensitiveCompare(b.entry.name) == .orderedAscending
         case .date: return (a.entry.modificationDate ?? .distantPast) < (b.entry.modificationDate ?? .distantPast)
-        case .size: return a.entry.size < b.entry.size
+        case .size: return (effectiveSize(a) ?? -1) < (effectiveSize(b) ?? -1)
         }
     }
 
@@ -87,7 +115,9 @@ struct DirectoryView: View {
             }
         }
         .task { await load() }
-        .sheet(item: $infoItem) { FileInfoView(item: $0, snapshotRoots: snapshotRoots) }
+        .sheet(item: $infoItem) {
+            FileInfoView(item: $0, snapshotRoots: snapshotRoots, folderSize: folderSizes[$0.entry.path])
+        }
     }
 
     @ViewBuilder private var statusOverlay: some View {
@@ -111,9 +141,11 @@ struct DirectoryView: View {
             ForEach(displayedItems) { item in
                 if item.entry.isDirectory {
                     NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
-                        DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                        DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails,
+                                     folderSize: folderSizes[item.entry.path],
+                                     calculating: calculatingPaths.contains(item.entry.path))
                     }
-                    .contextMenu { infoButton(item) }
+                    .contextMenu { folderMenu(item) }
                 } else {
                     Button { open(item) } label: {
                         DirectoryRow(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
@@ -133,10 +165,11 @@ struct DirectoryView: View {
                 ForEach(displayedItems) { item in
                     if item.entry.isDirectory {
                         NavigationLink(value: DirRoute(relPath: childRel(item.entry.name), title: item.entry.name)) {
-                            DirectoryGridCell(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
+                            DirectoryGridCell(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails,
+                                              folderSize: folderSizes[item.entry.path])
                         }
                         .buttonStyle(.plain)
-                        .contextMenu { infoButton(item) }
+                        .contextMenu { folderMenu(item) }
                     } else {
                         Button { open(item) } label: {
                             DirectoryGridCell(entry: item.entry, isDeleted: item.isDeleted, thumbnails: thumbnails)
@@ -157,6 +190,26 @@ struct DirectoryView: View {
         infoButton(item)
     }
 
+    @ViewBuilder private func folderMenu(_ item: SnapshotMerge.Item) -> some View {
+        if folderSizes[item.entry.path] == nil {
+            Button { Task { await calculateSize(item) } } label: {
+                Label("Calculate size", systemImage: "sum")
+            }
+        }
+        infoButton(item)
+    }
+
+    /// Computes a folder's recursive size on the NAS (one `du`) and caches it.
+    private func calculateSize(_ item: SnapshotMerge.Item) async {
+        let path = item.entry.path
+        guard item.entry.isDirectory, folderSizes[path] == nil, !calculatingPaths.contains(path) else { return }
+        calculatingPaths.insert(path)
+        defer { calculatingPaths.remove(path) }
+        if let size = await RemoteFolderSize.run(path: path, service: service) {
+            folderSizes[path] = size
+        }
+    }
+
     private func infoButton(_ item: SnapshotMerge.Item) -> some View {
         Button { infoItem = item } label: { Label("Info", systemImage: "info.circle") }
     }
@@ -169,6 +222,10 @@ struct DirectoryView: View {
             Button { ascending.toggle() } label: {
                 Label(ascending ? "Ascending" : "Descending",
                       systemImage: ascending ? "arrow.up" : "arrow.down")
+            }
+            Divider()
+            Picker("Minimum size", selection: $minSize) {
+                ForEach(SizeFilter.allCases) { Text($0.rawValue).tag($0) }
             }
             Divider()
             Section("Show") {

@@ -4,6 +4,8 @@ struct DirectoryRow: View {
     let entry: RemoteEntry
     let isDeleted: Bool
     let thumbnails: ThumbnailService
+    var folderSize: Int64? = nil       // computed on demand for directories
+    var calculating: Bool = false
 
     @State private var thumb: UIImage?
 
@@ -29,10 +31,14 @@ struct DirectoryRow: View {
         // (audio shows the music icon; no thumbnail)
     }
 
-    /// One spoken phrase per row: name, kind, size (files only), and deleted status.
+    /// One spoken phrase per row: name, kind, size (when known), and deleted status.
     private var accessibilityLabel: String {
         var parts = [entry.name, kindLabel]
-        if !entry.isDirectory {
+        if entry.isDirectory {
+            if let folderSize {
+                parts.append(ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file))
+            }
+        } else {
             parts.append(ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file))
         }
         if isDeleted { parts.append("deleted") }
@@ -82,7 +88,13 @@ struct DirectoryRow: View {
     }
 
     private var subtitle: String {
-        entry.isDirectory ? "Folder"
-            : ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
+        guard entry.isDirectory else {
+            return ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
+        }
+        if calculating { return "Folder · calculating…" }
+        if let folderSize {
+            return "Folder · " + ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file)
+        }
+        return "Folder"
     }
 }
