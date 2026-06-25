@@ -14,7 +14,9 @@ struct DirectoryRow: View {
             thumbView
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 8)
             if isDeleted {
@@ -87,14 +89,16 @@ struct DirectoryRow: View {
         }
     }
 
-    private var subtitle: String {
+    // The folder icon already conveys "folder", so the subtitle carries only size
+    // info: a file's size, a folder's computed size, "Calculating…", or nothing.
+    private var subtitle: String? {
         guard entry.isDirectory else {
             return ByteCountFormatter.string(fromByteCount: entry.size, countStyle: .file)
         }
-        if calculating { return "Folder · calculating…" }
+        if calculating { return "Calculating…" }
         if let folderSize {
-            return "Folder · " + ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file)
+            return ByteCountFormatter.string(fromByteCount: folderSize, countStyle: .file)
         }
-        return "Folder"
+        return nil
     }
 }
