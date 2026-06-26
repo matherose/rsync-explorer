@@ -8,6 +8,10 @@ struct CarouselPlayerView: View {
     let isActive: Bool
     let service: SFTPService
     let streamServer: LocalStreamServer
+    @Binding var pagingEnabled: Bool
+    // Bottom safe-area inset, supplied by the carousel because the page is full-bleed
+    // (its own safe area is zeroed). Lifts the control bar above the home indicator.
+    var safeBottom: CGFloat = 0
 
     @StateObject private var model = VLCPlayerModel()
     @State private var url: URL?
@@ -88,7 +92,7 @@ struct CarouselPlayerView: View {
                 Spacer()
             }
 
-            audioControls.padding(.horizontal).padding(.bottom, 24)
+            audioControls.padding(.horizontal).padding(.bottom, safeBottom + 24)
         }
     }
 
@@ -113,6 +117,7 @@ struct CarouselPlayerView: View {
                     }
                 }
                 .padding()
+                .padding(.bottom, safeBottom)   // clear the home indicator (page is full-bleed)
                 .background(LinearGradient(colors: [.clear, .black.opacity(0.6)],
                                            startPoint: .top, endPoint: .bottom))
             }
@@ -127,6 +132,9 @@ struct CarouselPlayerView: View {
     private var scrubber: some View {
         Scrubber(fraction: dragPosition ?? model.position,
                  onEditingChanged: { editing in
+                     // Freeze the carousel's page swipe while scrubbing so it can't steal
+                     // the horizontal drag. Re-enabled the instant the drag ends.
+                     pagingEnabled = !editing
                      model.isSeeking = editing
                      if editing {
                          hideTask?.cancel()
@@ -209,6 +217,10 @@ struct CarouselPlayerView: View {
     }
 
     private func update() async {
+        // Clear any stuck scrub state from a previous interaction so the clock can't stay
+        // frozen at "--:--" (mediaPlayerTimeChanged skips updates while isSeeking is true).
+        model.isSeeking = false
+        dragPosition = nil
         if isActive {
             if url == nil {
                 url = try? await streamServer.streamURL(path: entry.path, size: entry.size)

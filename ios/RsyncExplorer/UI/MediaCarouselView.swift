@@ -10,48 +10,91 @@ struct MediaCarouselView: View {
     let start: RemoteEntry
     var onClose: () -> Void
 
-    @State private var index = 0
+    @State private var currentID: Int?
+    // Flipped off while the scrubber is being dragged so the horizontal page scroll can't
+    // steal the drag out from under it. `.scrollDisabled` on a real ScrollView is reliable.
+    @State private var pagingEnabled = true
+
+    init(service: SFTPService, streamServer: LocalStreamServer, items: [RemoteEntry],
+         start: RemoteEntry, onClose: @escaping () -> Void) {
+        self.service = service
+        self.streamServer = streamServer
+        self.items = items
+        self.start = start
+        self.onClose = onClose
+        _currentID = State(initialValue: items.firstIndex(of: start) ?? 0)
+    }
+
+    private var currentIndex: Int { currentID ?? 0 }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-            TabView(selection: $index) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
-                    // Only materialize the active page and its immediate neighbors, so a
-                    // folder with hundreds of media items doesn't spin up a VLC player per
-                    // page. Off-window pages collapse to a placeholder; leaving the window
-                    // tears the player down (onDisappear) and frees its memory.
-                    Group {
-                        if abs(i - index) <= 1 {
-                            MediaPageView(entry: entry, isActive: index == i,
-                                          service: service, streamServer: streamServer)
-                        } else {
-                            Color.black
+        // A horizontal paging ScrollView (iOS 17) instead of a paging TabView, whose
+        // PageTabViewStyle nudges content a few px as it settles ("the bump"). Pages are
+        // pinned to the full screen for edge-to-edge media; the bottom safe-area inset is
+        // handed to the player so its control bar still sits above the home indicator.
+        GeometryReader { proxy in
+            let screen = CGSize(
+                width: proxy.size.width + proxy.safeAreaInsets.leading + proxy.safeAreaInsets.trailing,
+                height: proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom)
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { i, entry in
+                            // Only materialize the active page and its immediate neighbors,
+                            // so a folder with hundreds of items doesn't spin up a VLC
+                            // player per page; off-window pages collapse to a placeholder.
+                            Group {
+                                if abs(i - currentIndex) <= 1 {
+                                    MediaPageView(entry: entry, isActive: i == currentIndex,
+                                                  service: service, streamServer: streamServer,
+                                                  pagingEnabled: $pagingEnabled,
+                                                  safeBottom: proxy.safeAreaInsets.bottom)
+                                } else {
+                                    Color.black
+                                }
+                            }
+                            .frame(width: screen.width, height: screen.height)
+                            .id(i)
                         }
                     }
-                    .tag(i)
+                    .scrollTargetLayout()
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: $currentID)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(!pagingEnabled)
+                .ignoresSafeArea()
 
-            Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
-            }
-            .accessibilityLabel("Close")
-        }
-        .onAppear { index = items.firstIndex(of: start) ?? 0 }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 30).onEnded { v in
-                // Pull down from near the top to dismiss (avoids fighting lyrics scroll).
-                if v.startLocation.y < 150,
-                   v.translation.height > 150,
-                   v.translation.height > abs(v.translation.width) {
-                    onClose()
+                // Swipe down from the top to dismiss. Confined to a top strip so its drag
+                // recognizer doesn't blanket the whole screen.
+                dismissStrip
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.largeTitle).foregroundStyle(.white.opacity(0.9)).padding()
                 }
+                .accessibilityLabel("Close")
             }
-        )
+        }
+    }
+
+    private var dismissStrip: some View {
+        VStack {
+            Color.clear
+                .frame(maxWidth: .infinity).frame(height: 150)
+                .contentShape(Rectangle())
+                .simultaneousGesture(   // recognizes alongside controls; never blocks them
+                    DragGesture(minimumDistance: 20).onEnded { v in
+                        if v.translation.height > 120,
+                           v.translation.height > abs(v.translation.width) {
+                            onClose()
+                        }
+                    }
+                )
+            Spacer()
+        }
+        .ignoresSafeArea()
     }
 }
 
@@ -60,13 +103,17 @@ private struct MediaPageView: View {
     let isActive: Bool
     let service: SFTPService
     let streamServer: LocalStreamServer
+    @Binding var pagingEnabled: Bool
+    var safeBottom: CGFloat = 0
 
     var body: some View {
         switch entry.kind {
         case .image:
             ZoomableImageView(service: service, entry: entry, isActive: isActive)
         case .video, .audio:
-            CarouselPlayerView(entry: entry, isActive: isActive, service: service, streamServer: streamServer)
+            CarouselPlayerView(entry: entry, isActive: isActive, service: service,
+                               streamServer: streamServer, pagingEnabled: $pagingEnabled,
+                               safeBottom: safeBottom)
         default:
             Color.black
         }
@@ -107,9 +154,10 @@ struct ZoomableImageView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        // Load only once this page is the active one, so a folder of large photos
-        // doesn't decode every image at once. Stays loaded after first activation.
-        .task(id: isActive) { if isActive { await load() } }
+        // Load as soon as this page enters the carousel's render window (the active page
+        // and its two neighbors). Preloading the neighbors means the next image is already
+        // decoded when you swipe to it, instead of flashing a spinner then popping in.
+        .task { await load() }
     }
 
     private func load() async {
