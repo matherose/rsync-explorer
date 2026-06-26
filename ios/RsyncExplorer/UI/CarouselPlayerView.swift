@@ -88,52 +88,91 @@ struct CarouselPlayerView: View {
                 Spacer()
             }
 
-            controlBar.padding(.horizontal).padding(.bottom, 24)
+            audioControls.padding(.horizontal).padding(.bottom, 24)
         }
     }
 
     // MARK: Video layout
 
     private var videoControls: some View {
-        VStack {
-            Spacer()
-            controlBar
+        ZStack {
+            // Transport centered over the video, like popular streaming apps.
+            transportCluster(large: true)
+            // Scrubber + times + tracks along the bottom.
+            VStack {
+                Spacer()
+                VStack(spacing: 6) {
+                    scrubber
+                    HStack(spacing: 10) {
+                        Text(timeString(model.timeMs)).foregroundStyle(.white)
+                            .font(.caption).monospacedDigit().accessibilityHidden(true)
+                        Spacer()
+                        Text(timeString(model.lengthMs)).foregroundStyle(.white)
+                            .font(.caption).monospacedDigit().accessibilityHidden(true)
+                        if model.hasSelectableTracks { tracksMenu }
+                    }
+                }
                 .padding()
                 .background(LinearGradient(colors: [.clear, .black.opacity(0.6)],
                                            startPoint: .top, endPoint: .bottom))
+            }
         }
         .transition(.opacity)
     }
 
-    // MARK: Shared control bar
+    // MARK: Shared controls
 
-    private var controlBar: some View {
-        HStack(spacing: 14) {
+    /// Full-width seek bar: tap or drag anywhere to seek (see `Scrubber`). While
+    /// scrubbing we show `dragPosition` instead of the live position and pause auto-hide.
+    private var scrubber: some View {
+        Scrubber(fraction: dragPosition ?? model.position,
+                 onEditingChanged: { editing in
+                     model.isSeeking = editing
+                     if editing {
+                         hideTask?.cancel()
+                     } else {
+                         if let d = dragPosition { model.seek(fraction: d) }
+                         dragPosition = nil
+                         scheduleHide()
+                     }
+                 },
+                 onSeek: { dragPosition = $0 })
+            .accessibilityValue("\(timeString(model.timeMs)) of \(timeString(model.lengthMs))")
+    }
+
+    /// Skip-back-5 · play/pause · skip-forward-5. `large` is the video center-of-screen
+    /// size; audio uses the compact size in its bottom bar.
+    private func transportCluster(large: Bool) -> some View {
+        HStack(spacing: large ? 48 : 32) {
+            Button { model.skip(seconds: -5); scheduleHide() } label: {
+                Image(systemName: "gobackward.5").font(.system(size: large ? 30 : 24)).foregroundStyle(.white)
+            }
+            .accessibilityLabel("Back 5 seconds")
             Button { model.playPause(); scheduleHide() } label: {
                 Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title2).foregroundStyle(.white).frame(width: 30)
+                    .font(.system(size: large ? 52 : 34)).foregroundStyle(.white)
+                    .frame(width: large ? 64 : 42)
             }
             .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
-            Text(timeString(model.timeMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
-                .accessibilityHidden(true)
-            Slider(value: positionBinding, in: 0...1) { editing in
-                model.isSeeking = editing
-                if editing {
-                    hideTask?.cancel()
-                } else {
-                    if let d = dragPosition { model.seek(fraction: d) }
-                    dragPosition = nil
-                    scheduleHide()
-                }
+            Button { model.skip(seconds: 5); scheduleHide() } label: {
+                Image(systemName: "goforward.5").font(.system(size: large ? 30 : 24)).foregroundStyle(.white)
             }
-            .tint(.white)
-            .accessibilityLabel("Playback position")
-            .accessibilityValue("\(timeString(model.timeMs)) of \(timeString(model.lengthMs))")
-            Text(timeString(model.lengthMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
-                .accessibilityHidden(true)
-            if !isAudio && model.hasSelectableTracks {
-                tracksMenu
+            .accessibilityLabel("Forward 5 seconds")
+        }
+    }
+
+    /// Audio has no video surface to center the transport over, so its controls live in
+    /// the bottom bar: scrubber, times, then the transport cluster.
+    private var audioControls: some View {
+        VStack(spacing: 10) {
+            scrubber
+            HStack {
+                Text(timeString(model.timeMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
+                Spacer()
+                Text(timeString(model.lengthMs)).foregroundStyle(.white).font(.caption).monospacedDigit()
             }
+            .accessibilityHidden(true)
+            transportCluster(large: false)
         }
     }
 
@@ -167,10 +206,6 @@ struct CarouselPlayerView: View {
 
     @ViewBuilder private func trackLabel(_ name: String, selected: Bool) -> some View {
         if selected { Label(name, systemImage: "checkmark") } else { Text(name) }
-    }
-
-    private var positionBinding: Binding<Double> {
-        Binding(get: { dragPosition ?? model.position }, set: { dragPosition = $0 })
     }
 
     private func update() async {

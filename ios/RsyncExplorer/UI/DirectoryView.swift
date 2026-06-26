@@ -33,6 +33,7 @@ struct DirectoryView: View {
     let snapshotRoots: [String]
     let thumbnails: ThumbnailService
     let cache: DirectoryCache
+    let folderSizeStore: FolderSizeStore
     @Binding var media: MediaPresentation?
     let onDownload: (RemoteEntry) -> Void
 
@@ -212,6 +213,7 @@ struct DirectoryView: View {
         defer { calculatingPaths.remove(path) }
         if let size = await RemoteFolderSize.run(path: path, service: service) {
             folderSizes[path] = size
+            folderSizeStore.set(size, for: path)
         }
     }
 
@@ -220,6 +222,13 @@ struct DirectoryView: View {
     /// simultaneous `du` walks on the NAS; results stream into the rows as each finishes,
     /// and the in-flight tasks cancel when you navigate away (SwiftUI tears down `.task`).
     private func computeFolderSizes() async {
+        // Seed from the persisted store first — a folder sized on a previous launch
+        // never needs another `du` (snapshots are immutable).
+        for path in allItems.filter({ $0.entry.isDirectory }).map(\.entry.path)
+        where folderSizes[path] == nil {
+            if let cached = folderSizeStore.size(for: path) { folderSizes[path] = cached }
+        }
+
         let pending = allItems
             .filter { $0.entry.isDirectory }
             .map { $0.entry.path }
@@ -238,7 +247,10 @@ struct DirectoryView: View {
             for _ in 0..<min(maxConcurrent, pending.count) { schedule() }
             for await (path, size) in group {
                 calculatingPaths.remove(path)
-                if let size { folderSizes[path] = size }
+                if let size {
+                    folderSizes[path] = size
+                    folderSizeStore.set(size, for: path)   // persist across launches
+                }
                 schedule()
             }
         }

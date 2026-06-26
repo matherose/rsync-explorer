@@ -44,6 +44,19 @@ final class VLCPlayerModel: NSObject, ObservableObject, VLCMediaPlayerDelegate, 
     func seek(fraction: Double) { player.position = Float(max(0, min(1, fraction))) }
     func stop() { player.stop() }
 
+    /// Jumps relative to the current time, clamped to [0, length]. Used by the ±5s
+    /// buttons; updates the published time/position immediately so the UI doesn't lag
+    /// the delegate callback.
+    func skip(seconds: Int) {
+        let len = Int(player.media?.length.intValue ?? 0)
+        var target = Int(player.time.intValue) + seconds * 1000
+        target = max(0, target)
+        if len > 0 { target = min(target, len) }
+        player.time = VLCTime(int: Int32(target))
+        timeMs = target
+        if len > 0 { position = Double(target) / Double(len) }
+    }
+
     /// Becomes the lock-screen / Control-Center "Now Playing" item.
     func startNowPlaying(title: String) {
         nowPlayingTitle = title

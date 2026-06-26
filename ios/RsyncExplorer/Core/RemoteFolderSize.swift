@@ -3,7 +3,7 @@ import Foundation
 /// Result of a folder-size `du`. `partial` means `du` couldn't traverse everything
 /// (e.g. a permission-denied or non-executable subdir), so the byte count is only a
 /// lower bound — distinct from a folder that's genuinely (near) empty.
-enum FolderSize: Equatable {
+enum FolderSize: Equatable, Codable {
     case complete(Int64)
     case partial(Int64)
 
