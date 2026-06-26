@@ -52,8 +52,9 @@ struct DirectoryView: View {
     @State private var searchResults: [SearchHit]?
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
-    // Folder sizes are computed on demand (recursive `du` on the NAS) and cached here
-    // per path — safe to keep for the session since snapshots are immutable.
+    // Folder sizes are computed automatically after a folder loads (recursive `du` on
+    // the NAS, bounded concurrency) and cached here per path — safe to keep for the
+    // session since snapshots are immutable.
     @State private var folderSizes: [String: FolderSize] = [:]
     @State private var calculatingPaths: Set<String> = []
 
@@ -192,7 +193,9 @@ struct DirectoryView: View {
     }
 
     @ViewBuilder private func folderMenu(_ item: SnapshotMerge.Item) -> some View {
-        if folderSizes[item.entry.path] == nil {
+        // Sizes compute automatically; this stays as a manual retry for a folder whose
+        // `du` failed or timed out (so it's still un-sized and not in flight).
+        if folderSizes[item.entry.path] == nil, !calculatingPaths.contains(item.entry.path) {
             Button { Task { await calculateSize(item) } } label: {
                 Label("Calculate size", systemImage: "sum")
             }
@@ -200,7 +203,8 @@ struct DirectoryView: View {
         infoButton(item)
     }
 
-    /// Computes a folder's recursive size on the NAS (one `du`) and caches it.
+    /// Computes a single folder's recursive size on the NAS (one `du`) and caches it.
+    /// Used by the manual-retry menu; bulk auto-sizing goes through `computeFolderSizes`.
     private func calculateSize(_ item: SnapshotMerge.Item) async {
         let path = item.entry.path
         guard item.entry.isDirectory, folderSizes[path] == nil, !calculatingPaths.contains(path) else { return }
@@ -208,6 +212,35 @@ struct DirectoryView: View {
         defer { calculatingPaths.remove(path) }
         if let size = await RemoteFolderSize.run(path: path, service: service) {
             folderSizes[path] = size
+        }
+    }
+
+    /// Eagerly sizes every subfolder so the size appears on its own — no tap needed.
+    /// Bounded concurrency keeps a directory full of subfolders from launching dozens of
+    /// simultaneous `du` walks on the NAS; results stream into the rows as each finishes,
+    /// and the in-flight tasks cancel when you navigate away (SwiftUI tears down `.task`).
+    private func computeFolderSizes() async {
+        let pending = allItems
+            .filter { $0.entry.isDirectory }
+            .map { $0.entry.path }
+            .filter { folderSizes[$0] == nil && !calculatingPaths.contains($0) }
+        guard !pending.isEmpty else { return }
+
+        let maxConcurrent = 3
+        var next = 0
+        await withTaskGroup(of: (String, FolderSize?).self) { group in
+            func schedule() {
+                guard next < pending.count else { return }
+                let path = pending[next]; next += 1
+                calculatingPaths.insert(path)
+                group.addTask { (path, await RemoteFolderSize.run(path: path, service: service)) }
+            }
+            for _ in 0..<min(maxConcurrent, pending.count) { schedule() }
+            for await (path, size) in group {
+                calculatingPaths.remove(path)
+                if let size { folderSizes[path] = size }
+                schedule()
+            }
         }
     }
 
@@ -329,6 +362,7 @@ struct DirectoryView: View {
             allItems = cached
             loadFailed = false
             loading = false
+            await computeFolderSizes()
             return
         }
         loading = true
@@ -362,5 +396,6 @@ struct DirectoryView: View {
         let merged = SnapshotMerge.merge(listings)
         allItems = merged
         cache.set(merged, for: relPath)
+        await computeFolderSizes()
     }
 }
