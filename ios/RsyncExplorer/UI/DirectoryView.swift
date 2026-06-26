@@ -368,34 +368,21 @@ struct DirectoryView: View {
         loading = true
         defer { loading = false }
 
-        let listings: [[RemoteEntry]]
-        if let server = await RemoteListing.run(roots: snapshotRoots, rel: relPath, service: service) {
-            // One server-side `find` across all snapshots — one round-trip instead of
-            // one per snapshot root.
-            listings = server
-        } else {
-            // Fallback: list each snapshot root over SFTP. A folder may legitimately be
-            // absent from older snapshots, so tolerate per-root failures; only a total
-            // failure means the connection dropped.
-            var acc: [[RemoteEntry]] = []
-            var anySucceeded = false
-            for root in snapshotRoots {
-                let folder = relPath.isEmpty ? root : root + "/" + relPath
-                if let entries = try? await service.listDirectory(folder) {
-                    acc.append(entries)
-                    anySucceeded = true
-                } else {
-                    acc.append([])
-                }
-            }
-            guard anySucceeded else { loadFailed = true; return }   // don't cache a failure
-            listings = acc
+        // One server-side `find` across all snapshots (falling back to a per-root SFTP
+        // loop), with a completeness flag: nil means nothing could be read at all.
+        guard let listing = await DirectoryLister.load(roots: snapshotRoots, rel: relPath,
+                                                       service: service) else {
+            loadFailed = true   // surface Retry; never cache a total failure
+            return
         }
-
         loadFailed = false
-        let merged = SnapshotMerge.merge(listings)
+        let merged = SnapshotMerge.merge(listing.listings)
         allItems = merged
-        cache.set(merged, for: relPath)
+        // Cache only an authoritative (complete) read. A partial listing — a snapshot
+        // dropped mid-read (cold/rebuilding array, connection hiccup) — is shown but
+        // never cached, so a transient failure can't get baked in as "only the latest
+        // snapshot" until a manual refresh.
+        if listing.complete { cache.set(merged, for: relPath) }
         await computeFolderSizes()
     }
 }

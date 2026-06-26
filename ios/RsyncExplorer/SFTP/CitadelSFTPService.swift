@@ -85,6 +85,16 @@ actor CitadelSFTPService: SFTPService {
         }
     }
 
+    /// Lists `path`, classifying a failure so callers can tell a snapshot that
+    /// legitimately lacks this folder (the server answered no-such-file / permission —
+    /// `.absent`, safe to cache around) from a dropped read (`.failed`, don't cache).
+    /// Mirrors `isConnectionError`; `listDirectory` has already retried once on a
+    /// connection error, so a connection error here means the channel is really gone.
+    func listDirectoryOutcome(_ path: String) async -> DirectoryReadOutcome {
+        do { return .listed(try await listDirectory(path)) }
+        catch { return Self.isConnectionError(error) ? .failed : .absent }
+    }
+
     func resolveLatestSnapshot(under path: String) async throws -> String {
         // Delegates to listDirectory, which already takes the lock — do NOT lock
         // here too or we'd deadlock on the non-recursive semaphore.

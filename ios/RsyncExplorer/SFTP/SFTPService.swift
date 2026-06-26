@@ -5,6 +5,11 @@ enum SFTPServiceError: Error { case commandsUnsupported }
 protocol SFTPService: Sendable {
     func connect() async throws
     func listDirectory(_ path: String) async throws -> [RemoteEntry]
+    /// Lists a directory, distinguishing a definitive "not there" (a snapshot that
+    /// legitimately lacks this folder) from a transient read failure, so callers can
+    /// avoid caching a listing that's only partial because a read dropped. Default
+    /// treats any thrown error conservatively as `.failed`; the real service classifies.
+    func listDirectoryOutcome(_ path: String) async -> DirectoryReadOutcome
     func resolveLatestSnapshot(under path: String) async throws -> String
     func download(_ path: String, to localURL: URL,
                   progress: @escaping (Double) -> Void) async throws
@@ -29,6 +34,14 @@ extension SFTPService {
     /// silently falls back to the in-app walk when it throws.
     func runCommand(_ command: String) async throws -> String {
         throw SFTPServiceError.commandsUnsupported
+    }
+
+    /// Default outcome: any thrown error is treated conservatively as `.failed` (so a
+    /// partial listing is never cached). The real service overrides this to tell a
+    /// definitive "not there" from a dropped connection.
+    func listDirectoryOutcome(_ path: String) async -> DirectoryReadOutcome {
+        do { return .listed(try await listDirectory(path)) }
+        catch { return .failed }
     }
 
     /// Default header read: a single `read` from offset 0 (real services override to
