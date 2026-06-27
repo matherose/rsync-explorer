@@ -15,12 +15,15 @@ concurrency:
 
 jobs:
   build-test:
-    runs-on: macos-14            # matches the engine workflows; Xcode 15.x + iOS 17 sims
+    runs-on: macos-15            # Xcode 16+ image: required to open XcodeGen's objectVersion-77 project
     defaults:
       run:
         working-directory: ios
     steps:
       - uses: actions/checkout@v6
+
+      - name: Select newest installed Xcode   # need Xcode 16+ to open the objectVersion-77 project
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
 
       - name: Install XcodeGen
         run: brew install xcodegen
