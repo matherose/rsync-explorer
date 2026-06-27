@@ -1,0 +1,50 @@
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+
+# Cancel an older run on the same ref when a new push lands.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: macos-14            # matches the engine workflows; Xcode 15.x + iOS 17 sims
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project   # .xcodeproj is gitignored
+        run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project RsyncExplorer.xcodeproj -scheme RsyncExplorer
+
+      - name: Pick an available iOS simulator
+        id: sim
+        run: |
+          # Select an available iPhone simulator by UDID rather than pinning a device
+          # name (e.g. "iPhone 17") that may not exist on this runner's Xcode.
+          udid=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices[][] | select(.name|startswith("iPhone"))][0].udid')
+          test -n "$udid" || { echo "no iPhone simulator available"; exit 1; }
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Build & test (simulator, no signing)
+        run: |
+          xcodebuild test \
+            -project RsyncExplorer.xcodeproj \
+            -scheme RsyncExplorer \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO

@@ -3,8 +3,10 @@ name: build
 on:
   push:
     branches: [main]
+    paths: ['engine/**', 'app/**', 'meson.build', 'Info.plist', 'scripts/**', '.github/workflows/build.yml']
   pull_request:
     branches: [main]
+    paths: ['engine/**', 'app/**', 'meson.build', 'Info.plist', 'scripts/**', '.github/workflows/build.yml']
 
 # Cancel an older run on the same ref when a new push lands.
 concurrency:
