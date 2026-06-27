@@ -1,0 +1,66 @@
+name: release-ios
+
+# iOS releases use their own tag namespace (ios-v*) so they don't collide with the
+# desktop engine's release.yml, which owns plain v* tags. Example: `git tag ios-v0.1.0`.
+on:
+  push:
+    tags: ['ios-v*']
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: macos-15            # Xcode 16+ image: required to open XcodeGen's objectVersion-77 project
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v6
+
+      # Tag names are pushed by collaborators and git allows shell metachars in them.
+      # Reject anything that isn't a plain ios-vN[.N[.N]][-suffix] tag before the value
+      # reaches any run: shell.
+      - name: Validate tag name
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^ios-v[0-9]+(\.[0-9]+){0,2}(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' does not match expected ios-vN[.N[.N]][-suffix] format"
+            exit 1
+          fi
+
+      - name: Select newest installed Xcode   # need Xcode 16+ to open the objectVersion-77 project
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project   # .xcodeproj is gitignored
+        run: xcodegen generate
+
+      - name: Build unsigned .ipa
+        run: |
+          set -euo pipefail
+          # Device build with signing disabled — compiles fine without an Apple account.
+          xcodebuild archive \
+            -project RsyncExplorer.xcodeproj \
+            -scheme RsyncExplorer \
+            -configuration Release \
+            -archivePath build/RsyncExplorer.xcarchive \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          # xcodebuild -exportArchive needs signing, so hand-package the .app into an
+          # unsigned .ipa (Payload/<App>.app, zipped). Sideload tools re-sign at install.
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R build/RsyncExplorer.xcarchive/Products/Applications/RsyncExplorer.app build/Payload/
+          ( cd build && zip -qry "RsyncFS-${GITHUB_REF_NAME}-unsigned.ipa" Payload )
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "build/RsyncFS-${GITHUB_REF_NAME}-unsigned.ipa" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --notes "**Unsigned iOS build of RsyncFS.** A stock iPhone cannot install this by downloading it directly — sideload it with [AltStore](https://altstore.io) or [Sideloadly](https://sideloadly.io) using your own (free) Apple ID, or install on a jailbroken device. Free-account sideloads expire after 7 days and must be re-signed. Not signed for TestFlight / App Store."
